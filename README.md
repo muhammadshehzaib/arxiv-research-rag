@@ -46,22 +46,40 @@ bun install
 ---
 
 ### 2. Python Pipeline
-The Python implementation uses the `arxiv` client library and `pypdf` for text extraction.
+The Python implementation uses the `arxiv` client library, `pypdf` for text extraction, **Chroma DB** for the vector store, and the **Gemini API** for embeddings and RAG answers.
 
 **Installation:**
-```bash
-pip install arxiv pypdf
-```
+1. Install all required dependencies:
+   ```bash
+   pip install -r requirements.txt
+   pip install arxiv pypdf
+   ```
+2. Configure environment variables:
+   * Create a `.env` file (copied from `.env.example`).
+   * Set your `GEMINI_API_KEY` in `.env`.
 
 **Running the scripts:**
-1. Fetch and download PDFs:
+1. **Download Phase**: Fetch papers and download PDFs:
    ```bash
    python arxiv_downloader.py
    ```
-2. Chunk the downloaded PDFs:
+2. **Chunking Phase**: Parse PDFs and create text chunks:
    ```bash
    python pdf_chunker.py
    ```
+3. **Database Population**: Generate embeddings via Gemini and store them in Chroma DB:
+   ```bash
+   python populate_db.py
+   ```
+4. **RAG Querying**: Search database and answer questions using Gemini LLM:
+   * **Single Query Mode**:
+     ```bash
+     python query_rag.py --query "What is Retrieval Augmented Generation?"
+     ```
+   * **Interactive Chat Mode**:
+     ```bash
+     python query_rag.py
+     ```
 
 ---
 
@@ -73,4 +91,5 @@ pip install arxiv pypdf
 ---
 
 ## Change Log & Execution History
+- [2026-08-16] Added requirements.txt, populate_db.py, and query_rag.py to build and run the Python Chroma DB + Gemini RAG system.
 - [2026-08-16] Created the initial README.md explaining project structure, installation, usage, and pipelines.
