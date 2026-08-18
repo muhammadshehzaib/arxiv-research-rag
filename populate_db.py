@@ -11,7 +11,7 @@ load_dotenv()
 # Configuration
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 EMBEDDING_PROVIDER = os.getenv("EMBEDDING_PROVIDER", "gemini")
-EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "models/text-embedding-004")
+EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "models/gemini-embedding-001")
 CHROMA_PATH = os.getenv("CHROMA_PATH", "data/chroma_db")
 COLLECTION_NAME = os.getenv("QDRANT_COLLECTION_NAME", "arxiv_papers") # Defaulting or using env collection name
 
@@ -36,18 +36,31 @@ def load_chunks():
 def embed_texts(texts, model=EMBEDDING_MODEL):
     """
     Generates embeddings for a list of texts using the Gemini API.
+    Includes retry logic with exponential backoff for rate limits.
     """
-    try:
-        response = genai.embed_content(
-            model=model,
-            content=texts,
-            task_type="retrieval_document"
-        )
-        # response['embedding'] contains list of embedding vectors
-        return response['embedding']
-    except Exception as e:
-        print(f"❌ Error generating embeddings: {e}")
-        raise e
+    max_retries = 5
+    backoff_factor = 2
+    delay = 5  # Start with a 5-second delay
+    
+    for attempt in range(max_retries):
+        try:
+            response = genai.embed_content(
+                model=model,
+                content=texts,
+                task_type="retrieval_document"
+            )
+            return response['embedding']
+        except Exception as e:
+            err_msg = str(e).lower()
+            if "429" in err_msg or "quota" in err_msg or "resource_exhausted" in err_msg or "limit" in err_msg:
+                if attempt < max_retries - 1:
+                    print(f"   ⚠️ Rate limit hit (429/Quota). Retrying in {delay} seconds (Attempt {attempt + 1}/{max_retries})...")
+                    time.sleep(delay)
+                    delay *= backoff_factor
+                    continue
+            print(f"❌ Error generating embeddings: {e}")
+            raise e
+
 
 def populate_database():
     print("🚀 Initializing RAG Database Population...")
@@ -74,7 +87,7 @@ def populate_database():
     print(f"📦 Populating collection '{COLLECTION_NAME}'...")
 
     # 4. Generate Embeddings and Upsert in Batches
-    batch_size = 50
+    batch_size = 10
     start_time = time.time()
     
     for i in range(0, total_chunks, batch_size):
@@ -119,7 +132,8 @@ def populate_database():
             print("   Skipping this batch...")
         
         # Avoid hitting API rate limits too quickly
-        time.sleep(1)
+        time.sleep(2)
+
 
     duration = time.time() - start_time
     print(f"\n🎉 Database population complete in {duration:.2f} seconds!")

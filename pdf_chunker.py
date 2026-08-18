@@ -75,8 +75,10 @@ def main():
     processed_count = 0
 
     for paper in papers_metadata:
+        paper_id = paper.get('paperId') or paper.get('paper_id')
+        pdf_url = paper.get('pdfUrl') or paper.get('pdf_url')
         safe_title = "".join(c if c.isalnum() or c in (' ', '_', '-') else '' for c in paper['title']).strip()[:40]
-        filename = f"{paper['paperId'].replace('/', '_')}_{safe_title}.pdf"
+        filename = f"{paper_id.replace('/', '_')}_{safe_title}.pdf"
         pdf_path = os.path.join(papers_dir, filename)
 
         if not os.path.exists(pdf_path):
@@ -110,12 +112,12 @@ def main():
 
         for c in chunks:
             enriched = {
-                "chunk_id": f"{paper['paperId']}_c{c['chunk_index']}",
-                "paper_id": paper['paperId'],
+                "chunk_id": f"{paper_id}_c{c['chunk_index']}",
+                "paper_id": paper_id,
                 "title": paper['title'],
                 "authors": paper['authors'],
                 "published": paper['published'],
-                "pdf_url": paper['pdfUrl'],
+                "pdf_url": pdf_url,
                 "total_pages": total_pages,
                 **c
             }

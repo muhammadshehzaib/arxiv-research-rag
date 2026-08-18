@@ -9,8 +9,8 @@ load_dotenv()
 
 # Configuration
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "models/text-embedding-004")
-LLM_MODEL = os.getenv("LLM_MODEL", "gemini-1.5-flash")
+EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "models/gemini-embedding-001")
+LLM_MODEL = os.getenv("LLM_MODEL", "gemini-2.5-flash")
 CHROMA_PATH = os.getenv("CHROMA_PATH", "data/chroma_db")
 COLLECTION_NAME = os.getenv("QDRANT_COLLECTION_NAME", "arxiv_papers")
 

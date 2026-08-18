@@ -15,6 +15,10 @@ ENV/
 # Downloaded heavy PDF binaries (keep data directory, ignore downloaded PDF files)
 data/papers/*.pdf
 data/papers/
+data/chroma_db/
+data/papers_metadata.json
+data/paper_chunks.json
+
 
 # Logs & Temporary Files
 *.log

@@ -91,5 +91,15 @@ The Python implementation uses the `arxiv` client library, `pypdf` for text extr
 ---
 
 ## Change Log & Execution History
+- [2026-08-19] Updated .gitignore to exclude data/chroma_db/, paper_chunks.json, and papers_metadata.json from Git.
+- [2026-08-19] Updated LLM model default to gemini-2.5-flash because gemini-1.5-flash is no longer supported on the current API version/region.
+- [2026-08-19] Added retry logic with exponential backoff and reduced default batch size to 10 in populate_db.py to prevent 429 quota exhaustion errors.
+- [2026-08-19] Switched default embedding model to gemini-embedding-001 in config and code because text-embedding-004 is deprecated/unsupported.
+
+
+
+- [2026-08-19] Fixed a key mismatch bug in pdf_chunker.py to support both camelCase and snake_case metadata keys.
+
 - [2026-08-16] Added requirements.txt, populate_db.py, and query_rag.py to build and run the Python Chroma DB + Gemini RAG system.
 - [2026-08-16] Created the initial README.md explaining project structure, installation, usage, and pipelines.
+
