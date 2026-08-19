@@ -55,30 +55,62 @@ def get_query_embedding(query_text):
         print(f"❌ Failed to generate embedding for query: {e}")
         raise e
 
-def query_rag(collection, query_text, num_results=3):
+def query_rag(collection, query_text, num_results=3, paper_id=None, published_after=None, min_pages=None):
     # 1. Embed query
     query_vector = get_query_embedding(query_text)
     
-    # 2. Query Chroma
+    # 2. Construct filter (where clause) for Chroma DB
+    # Chroma only allows numerical range queries, so published_after is handled as a post-filter
+    where_clauses = []
+    if paper_id:
+        where_clauses.append({"paper_id": {"$eq": paper_id}})
+    if min_pages is not None:
+        where_clauses.append({"total_pages": {"$gte": int(min_pages)}})
+        
+    where = None
+    if len(where_clauses) == 1:
+        where = where_clauses[0]
+    elif len(where_clauses) > 1:
+        where = {"$and": where_clauses}
+        
+    # If filtering by date, retrieve more candidate matches to ensure we have enough matches after filtering
+    fetch_results = num_results
+    if published_after:
+        fetch_results = max(num_results * 5, 20)
+        
+    # 3. Query Chroma
     results = collection.query(
         query_embeddings=[query_vector],
-        n_results=num_results
+        n_results=fetch_results,
+        where=where
     )
     
     # Check if we got any results
     if not results or not results['documents'] or len(results['documents'][0]) == 0:
         return "No relevant papers found in the database.", []
     
-    # 3. Format context & capture sources
-    context_blocks = []
-    sources = []
-    
-    # Chroma returns a list of lists since it supports multiple query texts
+    # 4. Extract and apply post-filtering for string date values
     docs = results['documents'][0]
     metadatas = results['metadatas'][0]
     distances = results['distances'][0]
     
-    for i, (doc, meta, dist) in enumerate(zip(docs, metadatas, distances)):
+    filtered_results = []
+    for doc, meta, dist in zip(docs, metadatas, distances):
+        if published_after:
+            pub_date = meta.get("published", "")
+            if pub_date < published_after:
+                continue
+        filtered_results.append((doc, meta, dist))
+        
+    filtered_results = filtered_results[:num_results]
+    if not filtered_results:
+        return "No relevant papers found matching the specified publication date filter.", []
+    
+    # 5. Format context & capture sources
+    context_blocks = []
+    sources = []
+    
+    for i, (doc, meta, dist) in enumerate(filtered_results):
         title = meta.get("title", "Unknown Title")
         authors = meta.get("authors", "Unknown Authors")
         pdf_url = meta.get("pdf_url", "")
@@ -144,8 +176,17 @@ def print_result(query_text, answer, sources):
         print(f"      Distance Score: {src['distance']:.4f}")
     print("="*80 + "\n")
 
-def interactive_chat(collection):
+def interactive_chat(collection, paper_id=None, published_after=None, min_pages=None):
     print("\n✨ Entered Interactive RAG Chat Mode! Type 'exit' or 'quit' to close.")
+    active_filters = []
+    if paper_id:
+        active_filters.append(f"Paper ID: {paper_id}")
+    if published_after:
+        active_filters.append(f"Published After: {published_after}")
+    if min_pages is not None:
+        active_filters.append(f"Min Pages: {min_pages}")
+    if active_filters:
+        print(f"⚙️ Active Filters: {', '.join(active_filters)}")
     print("Ask any question based on your downloaded arXiv papers.\n")
     
     while True:
@@ -158,7 +199,13 @@ def interactive_chat(collection):
                 break
                 
             print("🔍 Searching vector database and generating answer...")
-            answer, sources = query_rag(collection, query_text)
+            answer, sources = query_rag(
+                collection, 
+                query_text, 
+                paper_id=paper_id, 
+                published_after=published_after, 
+                min_pages=min_pages
+            )
             print_result(query_text, answer, sources)
             
         except KeyboardInterrupt:
@@ -171,6 +218,9 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Query the arXiv Research RAG System.")
     parser.add_argument("--query", type=str, help="Single query to ask the RAG system. If omitted, starts interactive chat mode.")
     parser.add_argument("--results", type=int, default=3, help="Number of context documents to retrieve (default: 3).")
+    parser.add_argument("--paper-id", type=str, default=None, help="Filter results by a specific arXiv Paper ID.")
+    parser.add_argument("--published-after", type=str, default=None, help="Filter results by publication date (YYYY-MM-DD or newer).")
+    parser.add_argument("--min-pages", type=int, default=None, help="Filter results by minimum page count.")
     args = parser.parse_args()
     
     try:
@@ -178,10 +228,22 @@ if __name__ == "__main__":
         
         if args.query:
             print(f"🔍 Processing query: '{args.query}'...")
-            answer, sources = query_rag(collection, args.query, num_results=args.results)
+            answer, sources = query_rag(
+                collection, 
+                args.query, 
+                num_results=args.results,
+                paper_id=args.paper_id,
+                published_after=args.published_after,
+                min_pages=args.min_pages
+            )
             print_result(args.query, answer, sources)
         else:
-            interactive_chat(collection)
+            interactive_chat(
+                collection,
+                paper_id=args.paper_id,
+                published_after=args.published_after,
+                min_pages=args.min_pages
+            )
             
     except Exception as e:
         print(e)
