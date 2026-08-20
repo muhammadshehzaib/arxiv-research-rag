@@ -91,6 +91,8 @@ The Python implementation uses the `arxiv` client library, `pypdf` for text extr
 ---
 
 ## Change Log & Execution History
+- [2026-08-21] Modified paper selection dropdown to display only the paper title without prefixing the paper ID.
+- [2026-08-21] Refactored monolithic frontend into modular ES Modules and native reusable Web Components (RagSidebar, RagChat, and RagSources).
 - [2026-08-20] Created a premium web user interface (FastAPI + HTML/CSS/JS) for interactive chat and metadata filtering in app.py.
 - [2026-08-20] Configured global SSL bypass context in arxiv_downloader.py to prevent local environment certificate verification errors.
 - [2026-08-20] Updated PDF downloading method in arxiv_downloader.py to use urllib since result.download_pdf was removed in arxiv python library v4.0.0+.
