@@ -1,7 +1,14 @@
 import arxiv
 import os
 import json
+import ssl
 from datetime import datetime
+
+# Bypass SSL certificate verification issues (common in local Python setups)
+try:
+    ssl._create_default_https_context = ssl._create_unverified_context
+except AttributeError:
+    pass
 
 def fetch_arxiv_papers(query="Retrieval Augmented Generation", max_results=10, download_pdfs=False):
     """
@@ -49,7 +56,8 @@ def fetch_arxiv_papers(query="Retrieval Augmented Generation", max_results=10, d
             
             if not os.path.exists(filepath):
                 print(f"    📥 Downloading PDF to: {filepath}")
-                result.download_pdf(dirpath=pdf_dir, filename=filename)
+                from urllib.request import urlretrieve
+                urlretrieve(metadata['pdf_url'], filepath)
             else:
                 print(f"    ✅ PDF already downloaded.")
         
@@ -67,5 +75,5 @@ def fetch_arxiv_papers(query="Retrieval Augmented Generation", max_results=10, d
         print(f"📁 PDFs downloaded to: {pdf_dir}")
 
 if __name__ == "__main__":
-    # Fetch 10 papers related to RAG and save metadata + PDFs
-    fetch_arxiv_papers(query="Retrieval Augmented Generation", max_results=10, download_pdfs=True)
+    # Fetch 50 papers related to RAG and save metadata + PDFs
+    fetch_arxiv_papers(query="Retrieval Augmented Generation", max_results=50, download_pdfs=True)

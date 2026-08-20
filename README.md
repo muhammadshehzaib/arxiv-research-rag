@@ -91,6 +91,10 @@ The Python implementation uses the `arxiv` client library, `pypdf` for text extr
 ---
 
 ## Change Log & Execution History
+- [2026-08-20] Created a premium web user interface (FastAPI + HTML/CSS/JS) for interactive chat and metadata filtering in app.py.
+- [2026-08-20] Configured global SSL bypass context in arxiv_downloader.py to prevent local environment certificate verification errors.
+- [2026-08-20] Updated PDF downloading method in arxiv_downloader.py to use urllib since result.download_pdf was removed in arxiv python library v4.0.0+.
+- [2026-08-20] Increased downloader max results default from 10 to 50 in arxiv_downloader.py.
 - [2026-08-20] Added metadata filtering support (paper ID, publication date range, and minimum page count) to query_rag.py.
 - [2026-08-19] Updated .gitignore to exclude data/chroma_db/, paper_chunks.json, and papers_metadata.json from Git.
 - [2026-08-19] Updated LLM model default to gemini-2.5-flash because gemini-1.5-flash is no longer supported on the current API version/region.
