@@ -9,6 +9,7 @@ load_dotenv()
 
 # Configuration
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+EMBEDDING_PROVIDER = os.getenv("EMBEDDING_PROVIDER", "gemini")
 EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "models/gemini-embedding-001")
 LLM_MODEL = os.getenv("LLM_MODEL", "gemini-2.5-flash")
 CHROMA_PATH = os.getenv("CHROMA_PATH", "data/chroma_db")
@@ -30,8 +31,15 @@ def init_services():
             "Please run populate_db.py to create the vector database first."
         )
     chroma_client = chromadb.PersistentClient(path=CHROMA_PATH)
+    
+    if EMBEDDING_PROVIDER == "local":
+        from chromadb.utils import embedding_functions
+        ef = embedding_functions.DefaultEmbeddingFunction()
+    else:
+        ef = None
+        
     try:
-        collection = chroma_client.get_collection(name=COLLECTION_NAME)
+        collection = chroma_client.get_collection(name=COLLECTION_NAME, embedding_function=ef)
         return collection
     except Exception:
         raise ValueError(
@@ -56,10 +64,7 @@ def get_query_embedding(query_text):
         raise e
 
 def query_rag(collection, query_text, num_results=3, paper_id=None, published_after=None, min_pages=None):
-    # 1. Embed query
-    query_vector = get_query_embedding(query_text)
-    
-    # 2. Construct filter (where clause) for Chroma DB
+    # 1. Construct filter (where clause) for Chroma DB
     # Chroma only allows numerical range queries, so published_after is handled as a post-filter
     where_clauses = []
     if paper_id:
@@ -78,12 +83,20 @@ def query_rag(collection, query_text, num_results=3, paper_id=None, published_af
     if published_after:
         fetch_results = max(num_results * 5, 20)
         
-    # 3. Query Chroma
-    results = collection.query(
-        query_embeddings=[query_vector],
-        n_results=fetch_results,
-        where=where
-    )
+    # 2. Query Chroma (either local embedding function or manual embedding)
+    if EMBEDDING_PROVIDER == "local":
+        results = collection.query(
+            query_texts=[query_text],
+            n_results=fetch_results,
+            where=where
+        )
+    else:
+        query_vector = get_query_embedding(query_text)
+        results = collection.query(
+            query_embeddings=[query_vector],
+            n_results=fetch_results,
+            where=where
+        )
     
     # Check if we got any results
     if not results or not results['documents'] or len(results['documents'][0]) == 0:

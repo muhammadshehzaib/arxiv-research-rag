@@ -66,7 +66,8 @@ def populate_database():
     print("🚀 Initializing RAG Database Population...")
     
     # 1. Initialize Gemini
-    init_gemini()
+    if EMBEDDING_PROVIDER == "gemini":
+        init_gemini()
     
     # 2. Load Chunks
     chunks = load_chunks()
@@ -78,16 +79,24 @@ def populate_database():
     chroma_client = chromadb.PersistentClient(path=CHROMA_PATH)
     
     # Get or create collection
-    # Note: Chroma will run without local embeddings function because we supply precomputed embeddings
+    if EMBEDDING_PROVIDER == "local":
+        from chromadb.utils import embedding_functions
+        ef = embedding_functions.DefaultEmbeddingFunction()
+        print("🤖 Using local ONNX MiniLM embedding function.")
+    else:
+        ef = None
+        print("🌐 Using Gemini API embedding function.")
+        
     collection = chroma_client.get_or_create_collection(
         name=COLLECTION_NAME,
+        embedding_function=ef,
         metadata={"description": "arXiv Research Papers Chunks"}
     )
     
     print(f"📦 Populating collection '{COLLECTION_NAME}'...")
 
     # 4. Generate Embeddings and Upsert in Batches
-    batch_size = 10
+    batch_size = 50 if EMBEDDING_PROVIDER == "local" else 10
     start_time = time.time()
     
     for i in range(0, total_chunks, batch_size):
@@ -113,26 +122,33 @@ def populate_database():
             }
             metadatas.append(meta)
         
-        print(f"🌐 Generating embeddings for batch {i // batch_size + 1}/{(total_chunks + batch_size - 1) // batch_size} ({len(batch)} chunks)...")
+        print(f"📥 Processing batch {i // batch_size + 1}/{(total_chunks + batch_size - 1) // batch_size} ({len(batch)} chunks)...")
         
-        # Generate embeddings via Gemini API
+        # Generate embeddings and Upsert into Chroma
         try:
-            embeddings = embed_texts(documents)
-            
-            # Upsert into Chroma
-            collection.upsert(
-                ids=ids,
-                embeddings=embeddings,
-                documents=documents,
-                metadatas=metadatas
-            )
+            if EMBEDDING_PROVIDER == "gemini":
+                embeddings = embed_texts(documents)
+                collection.upsert(
+                    ids=ids,
+                    embeddings=embeddings,
+                    documents=documents,
+                    metadatas=metadatas
+                )
+            else:
+                # Local provider: let Chroma compute embeddings automatically
+                collection.upsert(
+                    ids=ids,
+                    documents=documents,
+                    metadatas=metadatas
+                )
             print(f"   ✅ Stored batch successfully.")
         except Exception as e:
             print(f"   ⚠️ Failed to process batch starting at index {i}. Error: {e}")
             print("   Skipping this batch...")
         
-        # Avoid hitting API rate limits too quickly
-        time.sleep(2)
+        # Avoid hitting API rate limits too quickly if using Gemini
+        if EMBEDDING_PROVIDER == "gemini":
+            time.sleep(2)
 
 
     duration = time.time() - start_time

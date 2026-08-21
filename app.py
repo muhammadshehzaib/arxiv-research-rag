@@ -50,6 +50,33 @@ def get_papers():
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.get("/api/stats")
+def get_stats():
+    global collection
+    if collection is None:
+        try:
+            collection = init_services()
+        except Exception:
+            pass
+            
+    metadata_path = os.path.join("data", "papers_metadata.json")
+    paper_count = 0
+    if os.path.exists(metadata_path):
+        try:
+            with open(metadata_path, "r", encoding="utf-8") as f:
+                paper_count = len(json.load(f))
+        except Exception:
+            pass
+            
+    chunk_count = 0
+    if collection is not None:
+        try:
+            chunk_count = collection.count()
+        except Exception:
+            pass
+            
+    return {"papers": paper_count, "chunks": chunk_count}
+
 @app.post("/api/query")
 def post_query(req: QueryRequest):
     global collection

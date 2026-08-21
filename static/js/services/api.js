@@ -15,6 +15,18 @@ export async function fetchPapers() {
 }
 
 /**
+ * Fetch database stats (paper and chunk count).
+ * @returns {Promise<Object>} Stats object.
+ */
+export async function fetchStats() {
+    const response = await fetch("/api/stats");
+    if (!response.ok) {
+        throw new Error("Failed to fetch database stats");
+    }
+    return await response.json();
+}
+
+/**
  * Submit a search query to the RAG backend.
  * @param {Object} queryParams Query payload including query text and filters.
  * @returns {Promise<Object>} Object containing target answer and source citations.

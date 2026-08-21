@@ -56,8 +56,11 @@ def fetch_arxiv_papers(query="Retrieval Augmented Generation", max_results=10, d
             
             if not os.path.exists(filepath):
                 print(f"    📥 Downloading PDF to: {filepath}")
-                from urllib.request import urlretrieve
-                urlretrieve(metadata['pdf_url'], filepath)
+                try:
+                    from urllib.request import urlretrieve
+                    urlretrieve(metadata['pdf_url'], filepath)
+                except Exception as ex:
+                    print(f"    ❌ Failed to download PDF: {ex}")
             else:
                 print(f"    ✅ PDF already downloaded.")
         

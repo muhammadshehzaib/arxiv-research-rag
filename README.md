@@ -91,6 +91,13 @@ The Python implementation uses the `arxiv` client library, `pypdf` for text extr
 ---
 
 ## Change Log & Execution History
+- [2026-08-22] Added /api/stats endpoint to app.py to expose the actual dynamic paper and chunk counts from Chroma DB.
+- [2026-08-22] Patched clean_text in pdf_chunker.py to strip unpaired surrogate characters that crash Rust-based tokenizers.
+- [2026-08-22] Updated query_rag.py to support querying Chroma using local embedding function.
+- [2026-08-22] Updated populate_db.py to support local embeddings using Chroma's built-in ONNX embedding function.
+- [2026-08-22] Enhanced pdf_chunker.py to dynamically query arXiv API for missing paper metadata and chunk all downloaded files.
+- [2026-08-22] Configured local open-source embedding provider (ONNX MiniLM) in the environment configuration.
+- [2026-08-21] Wrapped PDF downloader in a try-except block in arxiv_downloader.py to robustly handle transient errors and missing URLs.
 - [2026-08-21] Modified paper selection dropdown to display only the paper title without prefixing the paper ID.
 - [2026-08-21] Refactored monolithic frontend into modular ES Modules and native reusable Web Components (RagSidebar, RagChat, and RagSources).
 - [2026-08-20] Created a premium web user interface (FastAPI + HTML/CSS/JS) for interactive chat and metadata filtering in app.py.

@@ -138,8 +138,6 @@ class RagSidebar extends HTMLElement {
             opt.textContent = truncatedTitle;
             select.appendChild(opt);
         });
-
-        this.setStats(papers.length, 916);
     }
 
     /**
