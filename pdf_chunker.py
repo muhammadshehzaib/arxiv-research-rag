@@ -1,6 +1,7 @@
 import os
 import json
 import re
+import time
 import arxiv
 
 """
@@ -85,6 +86,27 @@ def fetch_missing_metadata(paper_ids):
             print(f"   ✅ Fetched {len(fetched_papers)} papers successfully so far.")
         except Exception as e:
             print(f"   ❌ Error fetching batch starting with {batch_ids[0]}: {e}")
+            print("   🔄 Falling back to fetching papers individually in this batch...")
+            for paper_id in batch_ids:
+                try:
+                    search = arxiv.Search(id_list=[paper_id])
+                    results = list(client.results(search))
+                    if results:
+                        result = results[0]
+                        metadata = {
+                            "paper_id": result.entry_id.split("/")[-1],
+                            "title": result.title,
+                            "authors": [author.name for author in result.authors],
+                            "published": result.published.strftime("%Y-%m-%d"),
+                            "summary": result.summary,
+                            "pdf_url": result.pdf_url,
+                            "categories": result.categories
+                        }
+                        fetched_papers.append(metadata)
+                        print(f"     ✅ Successfully fetched metadata for {paper_id}")
+                        time.sleep(1)
+                except Exception as ex:
+                    print(f"     ❌ Failed to fetch metadata for paper {paper_id}: {ex}")
             
     return fetched_papers
 

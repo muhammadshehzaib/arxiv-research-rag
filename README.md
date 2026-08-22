@@ -91,6 +91,8 @@ The Python implementation uses the `arxiv` client library, `pypdf` for text extr
 ---
 
 ## Change Log & Execution History
+- [2026-08-22] Added individual-fallback mechanism to pdf_chunker.py for fetching metadata to handle invalid/old-format arXiv ID failures.
+- [2026-08-22] Fixed UnicodeEncodeError crash in batch_ingestion.py when piping child output containing emoji characters.
 - [2026-08-22] Created batch_ingestion.py control script to automate loop downloading and indexing papers in batches of 50 up to 1,500.
 - [2026-08-22] Downloaded 43 new research papers on Graph/Agentic RAG and indexed all 4,373 chunks into Chroma DB using local open-source embeddings.
 - [2026-08-22] Linked frontend sidebar stats component with backend stats API to dynamically fetch and display actual paper and chunk counts.

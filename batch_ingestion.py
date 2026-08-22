@@ -72,9 +72,9 @@ def run_subprocess(script_name):
     env = os.environ.copy()
     env["PYTHONIOENCODING"] = "utf-8"
     
-    # Run the script and stream output
+    # Run the script unbuffered and stream output
     process = subprocess.Popen(
-        [sys.executable, script_name],
+        [sys.executable, "-u", script_name],
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
@@ -87,7 +87,9 @@ def run_subprocess(script_name):
         if output == '' and process.poll() is not None:
             break
         if output:
-            print(output.strip())
+            # Prevent UnicodeEncodeError on Windows terminals by replacing un-encodable characters
+            clean_line = output.strip().encode('ascii', errors='replace').decode('ascii')
+            print(clean_line)
             
     rc = process.poll()
     if rc != 0:
