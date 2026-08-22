@@ -91,6 +91,9 @@ The Python implementation uses the `arxiv` client library, `pypdf` for text extr
 ---
 
 ## Change Log & Execution History
+- [2026-08-22] Created batch_ingestion.py control script to automate loop downloading and indexing papers in batches of 50 up to 1,500.
+- [2026-08-22] Downloaded 43 new research papers on Graph/Agentic RAG and indexed all 4,373 chunks into Chroma DB using local open-source embeddings.
+- [2026-08-22] Linked frontend sidebar stats component with backend stats API to dynamically fetch and display actual paper and chunk counts.
 - [2026-08-22] Added /api/stats endpoint to app.py to expose the actual dynamic paper and chunk counts from Chroma DB.
 - [2026-08-22] Patched clean_text in pdf_chunker.py to strip unpaired surrogate characters that crash Rust-based tokenizers.
 - [2026-08-22] Updated query_rag.py to support querying Chroma using local embedding function.

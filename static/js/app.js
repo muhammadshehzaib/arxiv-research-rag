@@ -1,4 +1,4 @@
-import { fetchPapers, queryRAG } from "./services/api.js";
+import { fetchPapers, fetchStats, queryRAG } from "./services/api.js";
 import { showToast } from "./utils/helpers.js";
 
 // Import Web Components to register them
@@ -84,6 +84,14 @@ async function loadCorpus(sidebarComponent) {
     try {
         const papers = await fetchPapers();
         sidebarComponent.setPapers(papers);
+        
+        // Fetch and display dynamic stats from Chroma DB
+        try {
+            const stats = await fetchStats();
+            sidebarComponent.setStats(stats.papers, stats.chunks);
+        } catch (statsErr) {
+            console.error("Error loading stats:", statsErr);
+        }
     } catch (err) {
         console.error("Error loading papers list:", err);
         showToast("Error loading indexed corpus", "error");
