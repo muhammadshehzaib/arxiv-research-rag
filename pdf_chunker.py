@@ -104,9 +104,11 @@ def fetch_missing_metadata(paper_ids):
                         }
                         fetched_papers.append(metadata)
                         print(f"     ✅ Successfully fetched metadata for {paper_id}")
-                        time.sleep(1)
+                    # Respect rate limits when requesting individually
+                    time.sleep(3)
                 except Exception as ex:
                     print(f"     ❌ Failed to fetch metadata for paper {paper_id}: {ex}")
+                    time.sleep(3)
             
     return fetched_papers
 
@@ -148,11 +150,39 @@ def main():
     missing_ids = list(downloaded_ids - existing_ids)
     if missing_ids:
         print(f"🔍 {len(missing_ids)} papers are downloaded but missing from metadata.json")
-        fetched = fetch_missing_metadata(missing_ids)
+        
+        # Filter out old format IDs that lack category prefix and dot, which cause HTTP 400 in API
+        api_query_ids = [pid for pid in missing_ids if "." in pid or "/" in pid]
+        skipped_ids = [pid for pid in missing_ids if not ("." in pid or "/" in pid)]
+        
+        if skipped_ids:
+            print(f"   ⚠️ Skipping arXiv API query for {len(skipped_ids)} old-format IDs to prevent HTTP 400 errors.")
+            
+        fetched = fetch_missing_metadata(api_query_ids)
         for paper in fetched:
             pid = paper.get('paper_id')
             if pid and pid not in existing_ids:
                 papers_metadata.append(paper)
+                existing_ids.add(pid)
+                
+        # Generate fallback metadata for any paper that still lacks metadata
+        still_missing = list(downloaded_ids - existing_ids)
+        if still_missing:
+            print(f"   📝 Generating fallback metadata from filenames for {len(still_missing)} papers...")
+            for pid in still_missing:
+                filename = id_to_filename.get(pid)
+                # Parse title from filename: {pid}_{title}.pdf
+                clean_title = filename.replace(f"{pid}_", "").replace(".pdf", "").replace("_", " ")
+                fallback_paper = {
+                    "paper_id": pid,
+                    "title": clean_title,
+                    "authors": ["Unknown Authors"],
+                    "published": "Unknown Date",
+                    "summary": "No summary available (metadata generated from local file).",
+                    "pdf_url": "",
+                    "categories": []
+                }
+                papers_metadata.append(fallback_paper)
                 existing_ids.add(pid)
         
         # Save complete metadata
@@ -171,11 +201,35 @@ def main():
     except ImportError:
         has_pypdf = False
 
-    all_chunks = []
+    out_path = os.path.join(data_dir, "paper_chunks.json")
+    existing_chunks = []
+    already_saved_ids = set()
+    if os.path.exists(out_path):
+        try:
+            with open(out_path, "r", encoding="utf-8") as f:
+                existing_chunks = json.load(f)
+                for c in existing_chunks:
+                    already_saved_ids.add(c.get("paper_id"))
+            print(f"📦 Loaded {len(existing_chunks)} existing chunks for {len(already_saved_ids)} papers from cache.")
+        except Exception as e:
+            print(f"⚠️ Error reading existing chunks: {e}")
+
+    # Build active paper IDs lookup
+    active_paper_ids = {p.get('paperId') or p.get('paper_id') for p in active_metadata}
+
+    # Initialize all_chunks with chunks of papers that are still active
+    all_chunks = [c for c in existing_chunks if c.get("paper_id") in active_paper_ids]
+    already_saved_ids = {c.get("paper_id") for c in all_chunks}
+    
     processed_count = 0
 
     for paper in active_metadata:
         paper_id = paper.get('paperId') or paper.get('paper_id')
+        
+        # Skip if we already have chunks for this paper
+        if paper_id in already_saved_ids:
+            continue
+            
         pdf_url = paper.get('pdfUrl') or paper.get('pdf_url')
         
         # Get filename directly from our scanned map

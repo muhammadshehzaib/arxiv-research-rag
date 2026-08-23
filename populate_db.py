@@ -93,14 +93,25 @@ def populate_database():
         metadata={"description": "arXiv Research Papers Chunks"}
     )
     
-    print(f"📦 Populating collection '{COLLECTION_NAME}'...")
+    # Retrieve existing IDs from collection to avoid duplicate processing
+    try:
+        existing_ids = set(collection.get(include=[])["ids"])
+        print(f"🔍 Found {len(existing_ids)} existing chunks already indexed in database.")
+    except Exception as get_err:
+        print(f"⚠️ Could not fetch existing IDs from database (might be empty): {get_err}")
+        existing_ids = set()
+
+    # Filter to only keep chunks not already in the vector database
+    new_chunks = [c for c in chunks if c["chunk_id"] not in existing_ids]
+    total_new_chunks = len(new_chunks)
+    print(f"📦 Populating collection '{COLLECTION_NAME}' with {total_new_chunks} new chunks...")
 
     # 4. Generate Embeddings and Upsert in Batches
     batch_size = 50 if EMBEDDING_PROVIDER == "local" else 10
     start_time = time.time()
     
-    for i in range(0, total_chunks, batch_size):
-        batch = chunks[i : i + batch_size]
+    for i in range(0, total_new_chunks, batch_size):
+        batch = new_chunks[i : i + batch_size]
         
         # Prepare data for Chroma
         ids = [chunk["chunk_id"] for chunk in batch]

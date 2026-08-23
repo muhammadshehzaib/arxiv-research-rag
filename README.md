@@ -91,6 +91,8 @@ The Python implementation uses the `arxiv` client library, `pypdf` for text extr
 ---
 
 ## Change Log & Execution History
+- [2026-08-24] Optimized pdf_chunker.py metadata query to skip malformed old-format paper IDs, enforce 3s sleep to avoid HTTP 429, and auto-generate fallback metadata from filenames.
+- [2026-08-23] Optimized pdf_chunker.py and populate_db.py to cache and skip re-processing chunk data and re-calculating existing database embeddings.
 - [2026-08-23] Scaled target papers count to 3,000 and expanded predefined query list in batch_ingestion.py.
 - [2026-08-22] Added individual-fallback mechanism to pdf_chunker.py for fetching metadata to handle invalid/old-format arXiv ID failures.
 - [2026-08-22] Fixed UnicodeEncodeError crash in batch_ingestion.py when piping child output containing emoji characters.

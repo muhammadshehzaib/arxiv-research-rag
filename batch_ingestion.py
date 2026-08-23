@@ -149,7 +149,9 @@ def main():
                 print(f"Found {len(results)} search results.")
             except Exception as e:
                 print(f"Error searching arXiv: {e}")
-                time.sleep(10)
+                print("Sleeping 60 seconds to let rate limit cool down, and moving to next query...")
+                current_query_index += 1
+                time.sleep(60)
                 continue
                 
             for result in results:
