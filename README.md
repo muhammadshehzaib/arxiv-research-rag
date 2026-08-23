@@ -91,6 +91,7 @@ The Python implementation uses the `arxiv` client library, `pypdf` for text extr
 ---
 
 ## Change Log & Execution History
+- [2026-08-23] Scaled target papers count to 3,000 and expanded predefined query list in batch_ingestion.py.
 - [2026-08-22] Added individual-fallback mechanism to pdf_chunker.py for fetching metadata to handle invalid/old-format arXiv ID failures.
 - [2026-08-22] Fixed UnicodeEncodeError crash in batch_ingestion.py when piping child output containing emoji characters.
 - [2026-08-22] Created batch_ingestion.py control script to automate loop downloading and indexing papers in batches of 50 up to 1,500.

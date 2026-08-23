@@ -44,10 +44,20 @@ QUERIES = [
     "Tabular RAG",
     "Hierarchical RAG",
     "Dynamic RAG",
-    "Adaptive RAG"
+    "Adaptive RAG",
+    "LLM agent planning",
+    "Retrieval reasoning LLM",
+    "Chunking strategies RAG",
+    "Embedding fine-tuning RAG",
+    "Cross-Encoder reranking RAG",
+    "Text database similarity search",
+    "Large Language Model factual grounding",
+    "Retrieval augmented translation",
+    "SQL RAG database",
+    "RAG memory consolidation"
 ]
 
-TARGET_PAPERS = 1500
+TARGET_PAPERS = 3000
 BATCH_SIZE = 50
 DATA_DIR = os.path.join(".", "data")
 PAPERS_DIR = os.path.join(DATA_DIR, "papers")
