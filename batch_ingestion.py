@@ -140,7 +140,7 @@ def main():
             
             search = arxiv.Search(
                 query=query,
-                max_results=100, # fetch more results to find unique papers
+                max_results=300, # fetch more results to find unique papers
                 sort_by=arxiv.SortCriterion.Relevance
             )
             

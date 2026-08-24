@@ -16,6 +16,7 @@ ENV/
 data/papers/*.pdf
 data/papers/
 data/chroma_db/
+data/chroma_db_backup/
 data/papers_metadata.json
 data/paper_chunks.json
 

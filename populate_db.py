@@ -1,9 +1,18 @@
 import os
 import json
 import time
+import sys
 import chromadb
 import google.generativeai as genai
 from dotenv import load_dotenv
+
+# Ensure stdout/stderr use UTF-8 encoding on Windows
+if sys.platform.startswith("win"):
+    try:
+        sys.stdout.reconfigure(encoding='utf-8')
+        sys.stderr.reconfigure(encoding='utf-8')
+    except Exception:
+        pass
 
 # Load environment variables
 load_dotenv()
@@ -87,11 +96,20 @@ def populate_database():
         ef = None
         print("🌐 Using Gemini API embedding function.")
         
-    collection = chroma_client.get_or_create_collection(
-        name=COLLECTION_NAME,
-        embedding_function=ef,
-        metadata={"description": "arXiv Research Papers Chunks"}
-    )
+    try:
+        print(f"📦 Creating/getting collection '{COLLECTION_NAME}'...")
+        collection = chroma_client.get_or_create_collection(
+            name=COLLECTION_NAME,
+            embedding_function=ef,
+            metadata={"description": "arXiv Research Papers Chunks"}
+        )
+        print("   ✅ Collection loaded successfully.")
+    except Exception as e:
+        import traceback
+        with open("populate_error.txt", "w", encoding="utf-8") as f:
+            f.write(traceback.format_exc())
+        print(f"❌ Error getting/creating collection: {e}")
+        raise e
     
     # Retrieve existing IDs from collection to avoid duplicate processing
     try:
