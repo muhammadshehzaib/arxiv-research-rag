@@ -21,16 +21,25 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Global database collection reference
+# Global database collection and BM25 search reference
 collection = None
+bm25 = None
+bm25_chunks = None
 
 @app.on_event("startup")
 def startup_event():
-    global collection
+    global collection, bm25, bm25_chunks
     try:
         collection = init_services()
     except Exception as e:
         print(f"❌ Failed to initialize RAG services on startup: {e}")
+        
+    try:
+        from query_rag import init_bm25
+        bm25, bm25_chunks = init_bm25()
+        print("✅ BM25 sparse search index initialized on startup.")
+    except Exception as e:
+        print(f"❌ Failed to initialize BM25 sparse search index: {e}")
 
 class QueryRequest(BaseModel):
     query: str
@@ -79,7 +88,7 @@ def get_stats():
 
 @app.post("/api/query")
 def post_query(req: QueryRequest):
-    global collection
+    global collection, bm25, bm25_chunks
     if collection is None:
         try:
             collection = init_services()
@@ -87,14 +96,16 @@ def post_query(req: QueryRequest):
             raise HTTPException(status_code=500, detail=f"RAG services not initialized: {e}")
             
     try:
-        # Run query through RAG pipeline with optional filters
+        # Run query through RAG pipeline with optional filters and BM25 cache
         answer, sources = query_rag(
             collection,
             req.query,
             num_results=req.num_results,
             paper_id=req.paper_id,
             published_after=req.published_after,
-            min_pages=req.min_pages
+            min_pages=req.min_pages,
+            bm25=bm25,
+            bm25_chunks=bm25_chunks
         )
         return {"answer": answer, "sources": sources}
     except Exception as e:

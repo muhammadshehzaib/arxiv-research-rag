@@ -18,12 +18,16 @@ export function formatMarkdown(text) {
     escaped = escaped.replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>");
 
     // Replace lists: \n* item -> \n<li>item</li>
-    escaped = escaped.replace(/\n\s*[\*\-]\s*(.*?)/g, "\n<li>$1</li>");
-    escaped = escaped.replace(/(<li>.*?<\/li>)+/gs, "<ul>$&</ul>");
+    escaped = escaped.replace(/\n\s*[\*\-]\s*(.*)/g, "\n<li>$1</li>");
+    escaped = escaped.replace(/(<li>.*?<\/li>[\s\n]*)+/gs, (match) => {
+        return `<ul>${match.trim().replace(/\n/g, "")}</ul>`;
+    });
 
     // Replace numbered lists: \n1. item -> \n<li>item</li>
-    escaped = escaped.replace(/\n\s*\d+\.\s*(.*?)/g, "\n<li class='num-list'>$1</li>");
-    escaped = escaped.replace(/(<li class='num-list'>.*?<\/li>)+/gs, "<ol>$&</ol>");
+    escaped = escaped.replace(/\n\s*\d+\.\s*(.*)/g, "\n<li class='num-list'>$1</li>");
+    escaped = escaped.replace(/(<li class='num-list'>.*?<\/li>[\s\n]*)+/gs, (match) => {
+        return `<ol>${match.trim().replace(/\n/g, "")}</ol>`;
+    });
 
     // Replace linebreaks
     escaped = escaped.replace(/\n/g, "<br>");
