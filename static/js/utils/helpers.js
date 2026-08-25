@@ -17,16 +17,16 @@ export function formatMarkdown(text) {
     // Replace bold tags: **text** -> <strong>text</strong>
     escaped = escaped.replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>");
 
-    // Replace lists: \n* item -> \n<li>item</li>
-    escaped = escaped.replace(/\n\s*[\*\-]\s*(.*)/g, "\n<li>$1</li>");
-    escaped = escaped.replace(/(<li>.*?<\/li>[\s\n]*)+/gs, (match) => {
-        return `<ul>${match.trim().replace(/\n/g, "")}</ul>`;
+    // Replace bulleted lists
+    escaped = escaped.replace(/((?:\n\s*[\*\-]\s*[^\n]*(?:\n\s*\n)?)+)/g, (match) => {
+        const items = match.replace(/\n\s*[\*\-]\s*(.*)/g, "<li>$1</li>");
+        return `<ul>${items.replace(/\n/g, "")}</ul>`;
     });
 
-    // Replace numbered lists: \n1. item -> \n<li>item</li>
-    escaped = escaped.replace(/\n\s*\d+\.\s*(.*)/g, "\n<li class='num-list'>$1</li>");
-    escaped = escaped.replace(/(<li class='num-list'>.*?<\/li>[\s\n]*)+/gs, (match) => {
-        return `<ol>${match.trim().replace(/\n/g, "")}</ol>`;
+    // Replace numbered lists
+    escaped = escaped.replace(/((?:\n\s*\d+\.\s*[^\n]*(?:\n\s*\n)?)+)/g, (match) => {
+        const items = match.replace(/\n\s*\d+\.\s*(.*)/g, "<li>$1</li>");
+        return `<ol>${items.replace(/\n/g, "")}</ol>`;
     });
 
     // Replace linebreaks

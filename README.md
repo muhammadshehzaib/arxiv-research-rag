@@ -91,7 +91,7 @@ The Python implementation uses the `arxiv` client library, `pypdf` for text extr
 ---
 
 ## Change Log & Execution History
-- [2026-08-26] Fixed markdown list parsing bug in frontend helper.js where list items rendered on separate lines.
+- [2026-08-26] Refactored list parsing in frontend helper.js to bundle entire list blocks, fixing number sequence resets (1, 1, 1 -> 1, 2, 3) and line breaks.
 - [2026-08-26] Implemented Hybrid Retrieval (Dense + Sparse) with Reciprocal Rank Fusion (RRF) using rank_bm25.
 - [2026-08-25] Updated .gitignore to exclude data/chroma_db_backup/ directory from Git tracking.
 - [2026-08-25] Configured standard output stream encoding to UTF-8 on Windows in populate_db.py to prevent console encoding failures.
