@@ -303,7 +303,8 @@ def query_rag(collection, query_text, num_results=3, paper_id=None, published_af
             "pdf_url": pdf_url,
             "paper_id": paper_id,
             "distance": compatible_dist,
-            "rrf_score": rrf_score
+            "rrf_score": rrf_score,
+            "text": doc
         })
         
     context = "\n---\n".join(context_blocks)

@@ -5,15 +5,33 @@ import { showToast } from "./utils/helpers.js";
 import "./components/RagSidebar.js";
 import "./components/RagChat.js";
 import "./components/RagSources.js";
+import "./components/RagEvaluation.js";
 
 document.addEventListener("DOMContentLoaded", () => {
     // Select Web Components
     const sidebar = document.querySelector("rag-sidebar");
     const chat = document.querySelector("rag-chat");
+    const evaluation = document.querySelector("rag-evaluation");
     const sourcesPanel = document.querySelector("rag-sources");
 
     // Initial Fetch & Render
     loadCorpus(sidebar);
+
+    // Coordinate View Navigation
+    sidebar.addEventListener("nav-change", (e) => {
+        const view = e.detail.view;
+        if (view === "chat") {
+            chat.style.display = "flex";
+            if (evaluation) evaluation.style.display = "none";
+        } else if (view === "evaluation") {
+            chat.style.display = "none";
+            if (evaluation) {
+                evaluation.style.display = "flex";
+                evaluation.loadData();
+            }
+            if (sourcesPanel) sourcesPanel.toggle(false);
+        }
+    });
 
     // Coordinate Filter Changes
     sidebar.addEventListener("filter-change", (e) => {

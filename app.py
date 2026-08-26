@@ -111,6 +111,39 @@ def post_query(req: QueryRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.get("/api/eval/latest")
+def get_eval_latest():
+    results_path = os.path.join("data", "eval_results.json")
+    if not os.path.exists(results_path):
+        return {"status": "no_runs_yet", "message": "No evaluation has been run yet."}
+    try:
+        with open(results_path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/eval/history")
+def get_eval_history():
+    history_path = os.path.join("data", "eval_history.json")
+    if not os.path.exists(history_path):
+        return []
+    try:
+        with open(history_path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/eval/run")
+def post_eval_run():
+    try:
+        from evaluate_rag import run_evaluation
+        results = run_evaluation()
+        if results is None:
+            raise HTTPException(status_code=500, detail="Evaluation failed to run. Check server logs.")
+        return results
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 # Setup static folders
 static_dir = os.path.join(os.path.dirname(__file__), "static")
 os.makedirs(static_dir, exist_ok=True)

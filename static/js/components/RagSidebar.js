@@ -19,6 +19,15 @@ class RagSidebar extends HTMLElement {
                 </div>
             </div>
 
+            <div class="sidebar-nav">
+                <button id="nav-chat-btn" class="nav-btn active">
+                    <i data-lucide="message-square" style="width: 16px; height: 16px;"></i> Interactive Chat
+                </button>
+                <button id="nav-eval-btn" class="nav-btn">
+                    <i data-lucide="gauge" style="width: 16px; height: 16px;"></i> RAG Triad Eval
+                </button>
+            </div>
+
             <div class="sidebar-content">
                 <div class="filter-card">
                     <div class="filter-header">
@@ -82,6 +91,31 @@ class RagSidebar extends HTMLElement {
         const slider = this.querySelector("#min-pages");
         const sliderVal = this.querySelector("#min-pages-val");
         const resetBtn = this.querySelector("#clear-filters-btn");
+        
+        const navChatBtn = this.querySelector("#nav-chat-btn");
+        const navEvalBtn = this.querySelector("#nav-eval-btn");
+
+        if (navChatBtn && navEvalBtn) {
+            navChatBtn.addEventListener("click", () => {
+                console.log("🧭 Sidebar: Navigated to 'Interactive Chat' view");
+                navEvalBtn.classList.remove("active");
+                navChatBtn.classList.add("active");
+                this.dispatchEvent(new CustomEvent("nav-change", {
+                    detail: { view: "chat" },
+                    bubbles: true
+                }));
+            });
+
+            navEvalBtn.addEventListener("click", () => {
+                console.log("🧭 Sidebar: Navigated to 'RAG Triad Eval' dashboard view");
+                navChatBtn.classList.remove("active");
+                navEvalBtn.classList.add("active");
+                this.dispatchEvent(new CustomEvent("nav-change", {
+                    detail: { view: "evaluation" },
+                    bubbles: true
+                }));
+            });
+        }
 
         // Sync slider display value and dispatch event
         slider.addEventListener("input", (e) => {
