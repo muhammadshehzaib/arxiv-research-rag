@@ -134,7 +134,7 @@ def populate_database(rebuild=False):
     print(f"📦 Populating collection '{COLLECTION_NAME}' with {total_new_chunks} new chunks...")
 
     # 4. Generate Embeddings and Upsert in Batches
-    batch_size = 50 if EMBEDDING_PROVIDER == "local" else 10
+    batch_size = 1000 if EMBEDDING_PROVIDER == "local" else 10
     start_time = time.time()
     
     for i in range(0, total_new_chunks, batch_size):

@@ -26,6 +26,7 @@ class Reranker:
         self.cohere_api_key = os.getenv("COHERE_API_KEY")
         self.cohere_client = None
         self.flashrank_client = None
+        self.sentence_transformers_client = None
         
         # 1. Try to initialize Cohere Reranker if API key is provided
         if self.cohere_api_key and self.cohere_api_key != "your_cohere_api_key_here":
@@ -38,11 +39,20 @@ class Reranker:
             else:
                 print("⚠️ Cohere package is missing but COHERE_API_KEY is configured.")
                 
-        # 2. Try to initialize local FlashRank if Cohere is not initialized
+        # 2. Try to initialize local Sentence-Transformers Cross-Encoder
         if not self.cohere_client:
+            try:
+                from sentence_transformers import CrossEncoder
+                print("🤖 Initializing local Sentence-Transformers Cross-Encoder (ms-marco-MiniLM-L-6-v2)...")
+                self.sentence_transformers_client = CrossEncoder('cross-encoder/ms-marco-MiniLM-L-6-v2', max_length=512)
+                print("✅ Cross-Encoder reranker initialized successfully.")
+            except Exception as e:
+                print(f"⚠️ Local Cross-Encoder not available or failed to load: {e}")
+                
+        # 3. Fallback: Try to initialize local FlashRank if Cross-Encoder is not active
+        if not self.cohere_client and not self.sentence_transformers_client:
             if HAS_FLASHRANK:
                 try:
-                    # ms-marco-MiniLM-L-12-v2 is an excellent balanced reranker (34MB)
                     model_name = os.getenv("FLASHRANK_MODEL", "ms-marco-MiniLM-L-12-v2")
                     print(f"🤖 Initializing local FlashRank with model: {model_name}...")
                     self.flashrank_client = Ranker(model_name=model_name)
@@ -50,7 +60,7 @@ class Reranker:
                 except Exception as e:
                     print(f"⚠️ Failed to initialize FlashRank: {e}")
             else:
-                print("⚠️ flashrank package is not installed. Local reranking is disabled.")
+                print("⚠️ flashrank package is not installed. Local reranking fallback disabled.")
 
     def rerank(self, query, passages):
         """
@@ -79,7 +89,23 @@ class Reranker:
                     reranked.append(passage)
                 return reranked
             except Exception as e:
-                print(f"⚠️ Cohere reranking failed: {e}. Falling back to default/local ordering.")
+                print(f"⚠️ Cohere reranking failed: {e}. Falling back to other ordering.")
+                
+        # If Sentence-Transformers Cross-Encoder is active
+        if self.sentence_transformers_client:
+            try:
+                pairs = [(query, p["text"]) for p in passages]
+                scores = self.sentence_transformers_client.predict(pairs)
+                
+                # Assign scores to passages
+                for idx, score in enumerate(scores):
+                    passages[idx]["score"] = float(score)
+                
+                # Sort by score descending
+                passages.sort(key=lambda x: x["score"], reverse=True)
+                return passages
+            except Exception as e:
+                print(f"⚠️ Cross-Encoder reranking failed: {e}. Falling back to other ordering.")
                 
         # If FlashRank client is active
         if self.flashrank_client:
