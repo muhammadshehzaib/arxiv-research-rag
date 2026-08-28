@@ -71,7 +71,7 @@ def embed_texts(texts, model=EMBEDDING_MODEL):
             raise e
 
 
-def populate_database():
+def populate_database(rebuild=False):
     print("🚀 Initializing RAG Database Population...")
     
     # 1. Initialize Gemini
@@ -86,6 +86,15 @@ def populate_database():
     # 3. Setup Chroma Client
     print(f"📁 Connecting to Chroma DB at: {CHROMA_PATH}")
     chroma_client = chromadb.PersistentClient(path=CHROMA_PATH)
+    
+    if rebuild:
+        try:
+            print(f"🗑️ Rebuild flag active. Deleting collection '{COLLECTION_NAME}'...")
+            chroma_client.delete_collection(COLLECTION_NAME)
+            print("   ✅ Collection deleted successfully.")
+        except Exception as delete_err:
+            print(f"   ⚠️ Could not delete collection (it might not exist yet): {delete_err}")
+    
     
     # Get or create collection
     if EMBEDDING_PROVIDER == "local":
@@ -147,7 +156,9 @@ def populate_database():
                 "pdf_url": chunk.get("pdf_url", chunk.get("pdfUrl", "")),
                 "total_pages": int(chunk.get("total_pages", 0)),
                 "chunk_index": int(chunk.get("chunk_index", 0)),
-                "word_count": int(chunk.get("word_count", 0))
+                "word_count": int(chunk.get("word_count", 0)),
+                "parent_id": chunk.get("parent_id", ""),
+                "parent_text": chunk.get("parent_text", "")
             }
             metadatas.append(meta)
         
@@ -185,7 +196,12 @@ def populate_database():
     print(f"👉 Total items stored in '{COLLECTION_NAME}': {collection.count()}")
 
 if __name__ == "__main__":
+    import argparse
+    parser = argparse.ArgumentParser(description="Populate the Chroma Vector Database.")
+    parser.add_argument("--rebuild", action="store_true", help="Delete and recreate the Chroma collection.")
+    args = parser.parse_args()
+    
     try:
-        populate_database()
+        populate_database(rebuild=args.rebuild)
     except Exception as err:
         print(err)

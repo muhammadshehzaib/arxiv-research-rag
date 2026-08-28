@@ -1,8 +1,18 @@
 import os
+import sys
 import json
 import re
 import time
 import arxiv
+
+# Ensure stdout/stderr use UTF-8 encoding on Windows
+if sys.platform.startswith("win"):
+    try:
+        sys.stdout.reconfigure(encoding='utf-8')
+        sys.stderr.reconfigure(encoding='utf-8')
+    except Exception:
+        pass
+
 
 """
 Python PDF Text Extractor & Chunker for RAG
@@ -12,8 +22,15 @@ Python PDF Text Extractor & Chunker for RAG
 - Attaches rich metadata to each chunk for Qdrant storage
 """
 
-CHUNK_SIZE = 500  # Words per chunk
+CHUNK_SIZE = 500  # Words per chunk (deprecating, using parent/child sizes below)
 OVERLAP = 50      # Overlap between chunks
+
+# Parent-Child Chunking Configuration
+PARENT_CHUNK_SIZE = 800  # Words per parent chunk
+PARENT_OVERLAP = 100     # Overlap between parent chunks
+CHILD_CHUNK_SIZE = 150   # Words per child chunk
+CHILD_OVERLAP = 20       # Overlap between child chunks
+
 
 def clean_text(text):
     # Remove surrogate characters (U+D800 to U+DFFF) which break tokenizers in Rust-based python packages
@@ -265,23 +282,43 @@ def main():
             continue
 
         cleaned = clean_text(raw_text)
-        chunks = chunk_text(cleaned, CHUNK_SIZE, OVERLAP)
-
+        
+        # 1. Generate Parent Chunks
+        parent_chunks = chunk_text(cleaned, PARENT_CHUNK_SIZE, PARENT_OVERLAP)
+        
+        # 2. Generate Child Chunks within Parent Chunks
+        child_global_index = 0
+        paper_child_chunks = []
+        
+        for p in parent_chunks:
+            p_text = p["text"]
+            p_idx = p["chunk_index"]
+            
+            # Sub-chunk the parent chunk's text into child chunks
+            child_chunks = chunk_text(p_text, CHILD_CHUNK_SIZE, CHILD_OVERLAP)
+            
+            for c in child_chunks:
+                enriched = {
+                    "chunk_id": f"{paper_id}_c{child_global_index}",
+                    "parent_id": f"{paper_id}_p{p_idx}",
+                    "parent_text": p_text,
+                    "parent_index": p_idx,
+                    "paper_id": paper_id,
+                    "title": paper['title'],
+                    "authors": paper['authors'],
+                    "published": paper['published'],
+                    "pdf_url": pdf_url,
+                    "total_pages": total_pages,
+                    "chunk_index": child_global_index,
+                    "text": c["text"],
+                    "word_count": c["word_count"]
+                }
+                all_chunks.append(enriched)
+                paper_child_chunks.append(enriched)
+                child_global_index += 1
+                
         print(f"📄 Paper: '{paper['title'][:50]}...'")
-        print(f"   └─ Pages: {total_pages} | Words: {len(cleaned.split())} | Chunks: {len(chunks)}")
-
-        for c in chunks:
-            enriched = {
-                "chunk_id": f"{paper_id}_c{c['chunk_index']}",
-                "paper_id": paper_id,
-                "title": paper['title'],
-                "authors": paper['authors'],
-                "published": paper['published'],
-                "pdf_url": pdf_url,
-                "total_pages": total_pages,
-                **c
-            }
-            all_chunks.append(enriched)
+        print(f"   └─ Pages: {total_pages} | Words: {len(cleaned.split())} | Parents: {len(parent_chunks)} | Children (Stored): {len(paper_child_chunks)}")
         processed_count += 1
 
     out_path = os.path.join(data_dir, "paper_chunks.json")

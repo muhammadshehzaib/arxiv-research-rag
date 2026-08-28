@@ -8,6 +8,121 @@ import re
 import json
 from rank_bm25 import BM25Okapi
 
+# Reranker package imports
+try:
+    from flashrank import Ranker
+    HAS_FLASHRANK = True
+except ImportError:
+    HAS_FLASHRANK = False
+
+try:
+    import cohere
+    HAS_COHERE = True
+except ImportError:
+    HAS_COHERE = False
+
+class Reranker:
+    def __init__(self):
+        self.cohere_api_key = os.getenv("COHERE_API_KEY")
+        self.cohere_client = None
+        self.flashrank_client = None
+        
+        # 1. Try to initialize Cohere Reranker if API key is provided
+        if self.cohere_api_key and self.cohere_api_key != "your_cohere_api_key_here":
+            if HAS_COHERE:
+                try:
+                    self.cohere_client = cohere.Client(api_key=self.cohere_api_key)
+                    print("🚀 Cohere Rerank client initialized successfully.")
+                except Exception as e:
+                    print(f"⚠️ Failed to initialize Cohere client: {e}")
+            else:
+                print("⚠️ Cohere package is missing but COHERE_API_KEY is configured.")
+                
+        # 2. Try to initialize local FlashRank if Cohere is not initialized
+        if not self.cohere_client:
+            if HAS_FLASHRANK:
+                try:
+                    # ms-marco-MiniLM-L-12-v2 is an excellent balanced reranker (34MB)
+                    model_name = os.getenv("FLASHRANK_MODEL", "ms-marco-MiniLM-L-12-v2")
+                    print(f"🤖 Initializing local FlashRank with model: {model_name}...")
+                    self.flashrank_client = Ranker(model_name=model_name)
+                    print("✅ FlashRank reranker initialized successfully.")
+                except Exception as e:
+                    print(f"⚠️ Failed to initialize FlashRank: {e}")
+            else:
+                print("⚠️ flashrank package is not installed. Local reranking is disabled.")
+
+    def rerank(self, query, passages):
+        """
+        Reranks a list of passages (dicts with 'id', 'text', 'metadata') relative to the query.
+        Returns the list of passages sorted by relevancy score descending, with a 'score' key added.
+        """
+        if not passages:
+            return []
+            
+        # If Cohere client is active
+        if self.cohere_client:
+            try:
+                doc_texts = [p["text"] for p in passages]
+                response = self.cohere_client.rerank(
+                    model="rerank-english-v3.0",
+                    query=query,
+                    documents=doc_texts,
+                    top_n=len(passages)
+                )
+                
+                reranked = []
+                for res in response.results:
+                    idx = res.index
+                    passage = passages[idx]
+                    passage["score"] = res.relevance_score
+                    reranked.append(passage)
+                return reranked
+            except Exception as e:
+                print(f"⚠️ Cohere reranking failed: {e}. Falling back to default/local ordering.")
+                
+        # If FlashRank client is active
+        if self.flashrank_client:
+            try:
+                flash_passages = []
+                for p in passages:
+                    flash_passages.append({
+                        "id": p["id"],
+                        "text": p["text"],
+                        "metadata": p.get("metadata", {}),
+                        "rrf_score": p.get("rrf_score", 0.0)
+                    })
+                
+                results = self.flashrank_client.rerank(query=query, passages=flash_passages)
+                
+                reranked = []
+                for res in results:
+                    reranked.append({
+                        "id": res["id"],
+                        "text": res["text"],
+                        "metadata": res["metadata"],
+                        "rrf_score": res["rrf_score"],
+                        "score": res["score"]
+                    })
+                return reranked
+            except Exception as e:
+                print(f"⚠️ FlashRank reranking failed: {e}. Falling back to default/local ordering.")
+                
+        # Graceful fallback: just add a mock score based on index/RRF and return
+        print("⚠️ No active reranker provider. Returning results in RRF order.")
+        for idx, p in enumerate(passages):
+            p["score"] = 1.0 / (idx + 1)
+        return passages
+
+# Global lazy-loaded reranker
+_reranker_instance = None
+def get_reranker():
+    global _reranker_instance
+    if _reranker_instance is None:
+        _reranker_instance = Reranker()
+    return _reranker_instance
+
+
 # Ensure stdout/stderr use UTF-8 encoding on Windows
 if sys.platform.startswith("win"):
     try:
@@ -133,8 +248,8 @@ def query_rag(collection, query_text, num_results=3, paper_id=None, published_af
     elif len(where_clauses) > 1:
         where = {"$and": where_clauses}
         
-    # Retrieve more candidates (e.g. 20) for blending
-    fetch_results = max(num_results * 5, 20)
+    # Retrieve more candidates (e.g. 30) for blending and cross-encoder reranking
+    fetch_results = max(num_results * 6, 30)
         
     # --- DENSE RETRIEVAL (Chroma) ---
     dense_candidates = []
@@ -208,7 +323,7 @@ def query_rag(collection, query_text, num_results=3, paper_id=None, published_af
     print(f"ℹ️ Dense search retrieved {len(dense_candidates)} candidate(s). Top 3 IDs: {[c['chunk_id'] for c in dense_candidates[:3]]}")
     print(f"ℹ️ Sparse search retrieved {len(sparse_candidates)} candidate(s). Top 3 IDs: {[c[0]['chunk_id'] for c in sparse_candidates[:3]]}")
 
-    # --- BLENDING AND RERANKING (Reciprocal Rank Fusion) ---
+    # --- BLENDING (Reciprocal Rank Fusion) ---
     if not dense_candidates and not sparse_candidates:
         return "No relevant papers found matching your query or filters.", []
 
@@ -238,7 +353,9 @@ def query_rag(collection, query_text, num_results=3, paper_id=None, published_af
                 "pdf_url": chunk.get("pdf_url", chunk.get("pdfUrl", "")),
                 "total_pages": int(chunk.get("total_pages", 0)),
                 "chunk_index": int(chunk.get("chunk_index", 0)),
-                "word_count": int(chunk.get("word_count", 0))
+                "word_count": int(chunk.get("word_count", 0)),
+                "parent_id": chunk.get("parent_id", ""),
+                "parent_text": chunk.get("parent_text", "")
             }
             chunk_lookup[cid] = {
                 "text": chunk["text"],
@@ -262,20 +379,68 @@ def query_rag(collection, query_text, num_results=3, paper_id=None, published_af
     # Sort candidates by RRF score descending
     rrf_scores.sort(key=lambda x: x[1], reverse=True)
     
-    # Take top results
-    final_candidates = rrf_scores[:num_results]
+    # Take top candidates for cross-encoder reranking
+    top_k_for_rerank = 30
+    rrf_candidates = rrf_scores[:top_k_for_rerank]
     
-    # Max possible RRF score is for rank 1 in dense and rank 1 in sparse
-    max_possible_rrf = (1.0 / (k + 1)) + (1.0 / (k + 1)) if (dense_candidates and sparse_candidates) else (1.0 / (k + 1))
-    if max_possible_rrf == 0:
-        max_possible_rrf = 1.0
+    # Construct passages list for the Reranker
+    passages = []
+    for cid, rrf_score in rrf_candidates:
+        item = chunk_lookup[cid]
+        passages.append({
+            "id": cid,
+            "text": item["text"],
+            "metadata": item["metadata"],
+            "rrf_score": rrf_score
+        })
         
+    # --- CROSS-ENCODER RERANKING ---
+    reranker = get_reranker()
+    reranked_passages = reranker.rerank(query_text, passages)
+    
+    # --- PARENT CONTEXT RETRIEVAL & DE-DUPLICATION ---
+    # We iterate through the sorted reranked child chunks and resolve unique parent contexts
+    # until we collect up to num_results unique parent contexts.
+    unique_parents = []
+    seen_parent_ids = set()
+    for p in reranked_passages:
+        pid = p["metadata"].get("parent_id")
+        p_text = p["metadata"].get("parent_text")
+        
+        if pid and p_text:
+            # Parent-child chunk found
+            if pid not in seen_parent_ids:
+                seen_parent_ids.add(pid)
+                unique_parents.append({
+                    "chunk_id": p["id"],
+                    "text": p_text,  # Return parent text as context
+                    "metadata": p["metadata"],
+                    "score": p.get("score", 0.0),
+                    "rrf_score": p.get("rrf_score", 0.0)
+                })
+        else:
+            # Fallback if no parent context is present
+            cid = p["id"]
+            if cid not in seen_parent_ids:
+                seen_parent_ids.add(cid)
+                unique_parents.append({
+                    "chunk_id": cid,
+                    "text": p["text"],
+                    "metadata": p["metadata"],
+                    "score": p.get("score", 0.0),
+                    "rrf_score": p.get("rrf_score", 0.0)
+                })
+                
+        if len(unique_parents) == num_results:
+            break
+            
+    print(f"ℹ️ Reranking finished. Selected {len(unique_parents)} unique parent contexts from {len(reranked_passages)} reranked candidates.")
+    
     # Format context & capture sources
     context_blocks = []
     sources = []
     
-    for i, (cid, rrf_score) in enumerate(final_candidates):
-        item = chunk_lookup[cid]
+    for i, item in enumerate(unique_parents):
         doc = item["text"]
         meta = item["metadata"]
         
@@ -285,9 +450,11 @@ def query_rag(collection, query_text, num_results=3, paper_id=None, published_af
         paper_id = meta.get("paper_id", "")
         chunk_idx = meta.get("chunk_index", 0)
         
-        # Calculate a normalized distance for frontend compatibility (1 - normalized_rrf)
-        normalized_rrf = min(1.0, rrf_score / max_possible_rrf)
-        compatible_dist = 1.0 - normalized_rrf
+        # Convert reranker score to compatible distance metric for UI (distance = 1 - score)
+        score = item["score"]
+        if score < 0.0 or score > 1.0:
+            score = max(0.0, min(1.0, score))
+        compatible_dist = 1.0 - score
         
         block = (
             f"Source [{i+1}]: {title} (ID: {paper_id}, Chunk: {chunk_idx})\n"
@@ -303,7 +470,8 @@ def query_rag(collection, query_text, num_results=3, paper_id=None, published_af
             "pdf_url": pdf_url,
             "paper_id": paper_id,
             "distance": compatible_dist,
-            "rrf_score": rrf_score,
+            "rrf_score": item["rrf_score"],
+            "rerank_score": score,
             "text": doc
         })
         
