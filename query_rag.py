@@ -256,7 +256,84 @@ def get_query_embedding(query_text):
         print(f"❌ Failed to generate embedding for query: {e}")
         raise e
 
+def extract_metadata_filters(query_text):
+    """
+    Uses Gemini LLM in JSON mode to translate a natural language query into a clean search query
+    and structured metadata filters (paper_id, published_after date, min_pages count).
+    """
+    from datetime import date
+    current_date = date.today().strftime("%Y-%m-%d")
+    
+    prompt = f"""You are an advanced search query analyzer. Your task is to inspect a natural language RAG search query and extract structured search constraints.
+Today's local date is: {current_date}.
+
+Analyze the user's Query: "{query_text}"
+
+You must extract the following fields and return them as a JSON object:
+1. "clean_query" (string): The core subject or search topic, stripped of date phrases, paper id requests, or page count conditions (e.g. "Graph RAG" instead of "show me papers about Graph RAG after 2025"). If the query is just filters, return a generic query matching the topic or "".
+2. "paper_id" (string or null): If the user specifically asks for a paper ID (like "2501.18365" or "2501.18365v1"), extract it. Otherwise null.
+3. "published_after" (string or null): If the user requests papers published after, since, or from a certain year, month, or date, calculate the start date in "YYYY-MM-DD" format. If they say "after 2025", the start date is "2026-01-01". If they mention no date constraint, return null.
+4. "min_pages" (integer or null): If the user requests papers with a minimum page limit (e.g. "at least 15 pages" or "longer than 10 pages"), extract the integer page count. Otherwise null.
+
+Respond ONLY with a valid JSON object matching the schema below:
+{{
+  "clean_query": "search terms",
+  "paper_id": "arXiv ID string or null",
+  "published_after": "YYYY-MM-DD or null",
+  "min_pages": integer_value_or_null
+}}"""
+    
+    try:
+        model = genai.GenerativeModel(model_name=LLM_MODEL)
+        # Force JSON response schema
+        response = model.generate_content(
+            prompt,
+            generation_config={"response_mime_type": "application/json"}
+        )
+        data = json.loads(response.text.strip())
+        return {
+            "clean_query": data.get("clean_query", query_text),
+            "paper_id": data.get("paper_id"),
+            "published_after": data.get("published_after"),
+            "min_pages": data.get("min_pages")
+        }
+    except Exception as e:
+        print(f"⚠️ Query Translation failed (using original query without auto-filters): {e}")
+        return {
+            "clean_query": query_text,
+            "paper_id": None,
+            "published_after": None,
+            "min_pages": None
+        }
+
 def query_rag(collection, query_text, num_results=3, paper_id=None, published_after=None, min_pages=None, bm25=None, bm25_chunks=None):
+    # Auto-extract filters if none are manually specified
+    if not paper_id and not published_after and not min_pages:
+        filters = extract_metadata_filters(query_text)
+        clean_q = filters["clean_query"]
+        
+        # Apply extracted filters
+        paper_id = filters["paper_id"]
+        published_after = filters["published_after"]
+        min_pages = filters["min_pages"]
+        
+        # Log auto-detection if any filters were found
+        detected = []
+        if paper_id:
+            detected.append(f"Paper ID: {paper_id}")
+        if published_after:
+            detected.append(f"Published After: {published_after}")
+        if min_pages is not None:
+            detected.append(f"Min Pages: {min_pages}")
+            
+        if detected:
+            print(f"⚙️ Query-to-Filter Auto-translation:")
+            print(f"   Original Query:  '{query_text}'")
+            print(f"   Cleaned Search:  '{clean_q}'")
+            print(f"   Auto-applied:    {', '.join(detected)}")
+            # Use the cleaned search query for retrieving embeddings/words
+            query_text = clean_q
+
     # 1. Fetch BM25 index if not passed
     if bm25 is None or bm25_chunks is None:
         bm25, bm25_chunks = get_bm25_index()

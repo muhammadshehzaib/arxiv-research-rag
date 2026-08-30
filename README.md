@@ -91,6 +91,7 @@ The Python implementation uses the `arxiv` client library, `pypdf` for text extr
 ---
 
 ## Change Log & Execution History
+- [2026-08-31] Implemented Metadata Auto-Filtering (Query-to-Filter Translator) in query_rag.py using Gemini in JSON mode.
 - [2026-08-29] Integrated local Cross-Encoder reranker (ms-marco-MiniLM-L-6-v2) using sentence-transformers in query_rag.py.
 - [2026-08-27] Implemented the RAG Triad Quantitative Evaluation Framework (Faithfulness, Answer Relevance, Context Recall & Precision) with a command-line runner and a web dashboard.
 - [2026-08-26] Refactored list parsing in frontend helper.js to bundle entire list blocks, fixing number sequence resets (1, 1, 1 -> 1, 2, 3) and line breaks.
