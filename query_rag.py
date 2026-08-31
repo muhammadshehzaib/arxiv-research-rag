@@ -1,5 +1,6 @@
 import os
 import sys
+import time
 import argparse
 import chromadb
 import google.generativeai as genai
@@ -7,6 +8,7 @@ from dotenv import load_dotenv
 import re
 import json
 from rank_bm25 import BM25Okapi
+from semantic_cache import get_semantic_cache
 
 # Reranker package imports
 try:
@@ -334,6 +336,27 @@ def query_rag(collection, query_text, num_results=3, paper_id=None, published_af
             # Use the cleaned search query for retrieving embeddings/words
             query_text = clean_q
 
+    # --- SEMANTIC CACHE LOOKUP ---
+    start_time = time.time()
+    active_filters = {
+        "paper_id": paper_id,
+        "published_after": published_after,
+        "min_pages": min_pages
+    }
+    
+    cache = get_semantic_cache()
+    is_hit, cached_answer, cached_sources, sim_score, matched_query = cache.lookup(query_text, filters=active_filters)
+    if is_hit:
+        elapsed_ms = (time.time() - start_time) * 1000
+        print(f"\n⚡ [SEMANTIC CACHE HIT] (Similarity: {sim_score * 100:.1f}% to cached query: '{matched_query}')")
+        print(f"⏱️ Response Latency: {elapsed_ms:.1f}ms (LLM API Cost: $0.00)")
+        return cached_answer, cached_sources
+    else:
+        if sim_score > 0.0:
+            print(f"ℹ️ [SEMANTIC CACHE MISS] (Best candidate similarity: {sim_score * 100:.1f}% < threshold). Running full pipeline...")
+        else:
+            print(f"ℹ️ [SEMANTIC CACHE MISS] (Empty cache). Running full pipeline...")
+
     # 1. Fetch BM25 index if not passed
     if bm25 is None or bm25_chunks is None:
         bm25, bm25_chunks = get_bm25_index()
@@ -601,7 +624,14 @@ Answer:"""
     try:
         model = genai.GenerativeModel(model_name=LLM_MODEL)
         response = model.generate_content(prompt)
-        return response.text, sources
+        generated_answer = response.text
+        
+        # Store in Semantic Cache for future identical / paraphrased queries
+        cache.store(query_text, generated_answer, sources, filters=active_filters)
+        elapsed_ms = (time.time() - start_time) * 1000
+        print(f"⏱️ Full Pipeline Latency: {elapsed_ms:.1f}ms (Response Generated & Cached)")
+        
+        return generated_answer, sources
     except Exception as e:
         return f"❌ Failed to generate response from Gemini model: {e}", sources
 

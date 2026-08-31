@@ -91,6 +91,7 @@ The Python implementation uses the `arxiv` client library, `pypdf` for text extr
 ---
 
 ## Change Log & Execution History
+- [2026-09-01] Implemented on-device Semantic Caching with vectorized cosine similarity lookup to achieve sub-30ms response times on repeated/paraphrased queries.
 - [2026-08-31] Implemented Metadata Auto-Filtering (Query-to-Filter Translator) in query_rag.py using Gemini in JSON mode.
 - [2026-08-29] Integrated local Cross-Encoder reranker (ms-marco-MiniLM-L-6-v2) using sentence-transformers in query_rag.py.
 - [2026-08-27] Implemented the RAG Triad Quantitative Evaluation Framework (Faithfulness, Answer Relevance, Context Recall & Precision) with a command-line runner and a web dashboard.
