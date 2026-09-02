@@ -7,8 +7,11 @@ import google.generativeai as genai
 from dotenv import load_dotenv
 import re
 import json
+import numpy as np
 from rank_bm25 import BM25Okapi
 from semantic_cache import get_semantic_cache
+
+REFUSAL_CONFIDENCE_THRESHOLD = float(os.getenv("REFUSAL_THRESHOLD", "0.70"))
 
 # Reranker package imports
 try:
@@ -548,6 +551,14 @@ def query_rag(collection, query_text, num_results=3, paper_id=None, published_af
             }
             
     # Calculate RRF scores
+    if not all_candidate_ids:
+        refusal_msg = (
+            "🛡️ [REFUSAL LADDER ACTIVATED - Rung 1: No Matching Documents]\n\n"
+            "Based on the 2,528 arXiv research papers in the database, no documents matching this query or the active filters were found."
+        )
+        print(f"\n{refusal_msg}\n")
+        return refusal_msg, []
+
     k = 60
     rrf_scores = []
     for cid in all_candidate_ids:
@@ -620,6 +631,14 @@ def query_rag(collection, query_text, num_results=3, paper_id=None, published_af
             
     print(f"ℹ️ Reranking finished. Selected {len(unique_parents)} unique parent contexts from {len(reranked_passages)} reranked candidates.")
     
+    if not unique_parents:
+        refusal_msg = (
+            "🛡️ [REFUSAL LADDER ACTIVATED - Rung 1: Zero Contexts Selected]\n\n"
+            "Based on the 2,528 arXiv research papers in the database, no valid contexts could be extracted for this query."
+        )
+        print(f"\n{refusal_msg}\n")
+        return refusal_msg, []
+
     # Format context & capture sources
     context_blocks = []
     sources = []
@@ -635,14 +654,15 @@ def query_rag(collection, query_text, num_results=3, paper_id=None, published_af
         chunk_idx = meta.get("chunk_index", 0)
         
         # Convert reranker score to compatible distance metric for UI (distance = 1 - score)
-        score = item["score"]
-        if score < 0.0 or score > 1.0:
-            score = max(0.0, min(1.0, score))
-        compatible_dist = 1.0 - score
+        raw_score = item["score"]
+        # Normalized Sigmoid confidence
+        confidence = float(1.0 / (1.0 + np.exp(-raw_score)))
+        compatible_dist = 1.0 - confidence
         
         block = (
             f"Source [{i+1}]: {title} (ID: {paper_id}, Chunk: {chunk_idx})\n"
             f"Authors: {authors}\n"
+            f"Confidence: {confidence * 100:.1f}%\n"
             f"Text content:\n{doc}\n"
         )
         context_blocks.append(block)
@@ -654,10 +674,34 @@ def query_rag(collection, query_text, num_results=3, paper_id=None, published_af
             "pdf_url": pdf_url,
             "paper_id": paper_id,
             "distance": compatible_dist,
+            "confidence": confidence,
             "rrf_score": item["rrf_score"],
-            "rerank_score": score,
+            "rerank_score": raw_score,
             "text": doc
         })
+
+    # --- REFUSAL LADDER: RUNG 2 (Relevance Floor / Insufficient Evidence) ---
+    top_confidence = sources[0]["confidence"]
+    top_raw_score = sources[0]["rerank_score"]
+    
+    if top_confidence < REFUSAL_CONFIDENCE_THRESHOLD:
+        elapsed_ms = (time.time() - start_time) * 1000
+        top_title = sources[0]["title"]
+        
+        refusal_msg = (
+            f"🛡️ [REFUSAL LADDER ACTIVATED - Insufficient Evidence]\n\n"
+            f"Based on the 2,528 arXiv research papers in the database, there is insufficient evidence "
+            f"to reliably answer this question (Retrieval Confidence: {top_confidence * 100:.1f}% < {REFUSAL_CONFIDENCE_THRESHOLD * 100:.0f}% threshold).\n\n"
+            f"The corpus focuses on AI, Machine Learning, Computer Vision, NLP, and Cybersecurity.\n"
+            f"Closest indexed paper: \"{top_title}\""
+        )
+        
+        print(f"\n🛡️ [REFUSAL LADDER ACTIVATED - Rung 2: Low Relevance Floor]")
+        print(f"   Top Match Score:      {top_raw_score:.3f} (Confidence: {top_confidence * 100:.1f}%)")
+        print(f"   Required Threshold:   {REFUSAL_CONFIDENCE_THRESHOLD * 100:.0f}%")
+        print(f"   Status:               Aborted LLM generation in {elapsed_ms:.1f}ms (Zero Hallucination, $0 API Cost)\n")
+        
+        return refusal_msg, sources
         
     context = "\n---\n".join(context_blocks)
     

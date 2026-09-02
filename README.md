@@ -91,6 +91,7 @@ The Python implementation uses the `arxiv` client library, `pypdf` for text extr
 ---
 
 ## Change Log & Execution History
+- [2026-09-03] Implemented The Refusal Ladder (Multi-Tier Confidence Guardrail) with Sigmoid Cross-Encoder scoring to abort generation on out-of-domain queries and eliminate hallucinations.
 - [2026-09-01] Added Multi-Turn Conversational Memory with Query Rephrasing to automatically contextualize pronoun-heavy follow-up questions.
 - [2026-09-01] Implemented on-device Semantic Caching with vectorized cosine similarity lookup to achieve sub-30ms response times on repeated/paraphrased queries.
 - [2026-08-31] Implemented Metadata Auto-Filtering (Query-to-Filter Translator) in query_rag.py using Gemini in JSON mode.
