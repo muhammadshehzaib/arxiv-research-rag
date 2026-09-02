@@ -308,7 +308,65 @@ Respond ONLY with a valid JSON object matching the schema below:
             "min_pages": None
         }
 
-def query_rag(collection, query_text, num_results=3, paper_id=None, published_after=None, min_pages=None, bm25=None, bm25_chunks=None):
+def rephrase_query_with_history(query_text, chat_history):
+    """
+    Reformulates a conversational follow-up query into a standalone query that resolves
+    pronouns (anaphoras) and implicit references based on the multi-turn chat history.
+    """
+    if not chat_history or len(chat_history) == 0:
+        return query_text
+
+    # Format the last up to 6 turns of chat history
+    formatted_history = []
+    for msg in chat_history[-6:]:
+        role = "User" if msg.get("role") in ["user", "human"] else "Assistant"
+        content = msg.get("content", "").strip()
+        # Truncate very long assistant replies in context to avoid token bloat
+        if len(content) > 300:
+            content = content[:300] + "..."
+        formatted_history.append(f"{role}: {content}")
+        
+    history_str = "\n".join(formatted_history)
+    
+    prompt = f"""You are an expert conversation contextualizer for an academic research RAG search engine.
+Given the following conversation history between a User and an Assistant, and the User's latest follow-up question, rewrite the latest question to be a standalone, self-contained search query.
+
+Rules:
+1. Resolve all ambiguous pronouns and references (e.g., "its", "their", "this paper", "the method", "these attacks") using the conversation history.
+2. If the question is already standalone and does not reference previous context, return it unchanged.
+3. Do NOT answer the question. Only output the reformulated question string.
+4. Keep the question concise, precise, and optimized for research paper retrieval.
+
+Conversation History:
+{history_str}
+
+Latest User Question: "{query_text}"
+
+Standalone Search Query:"""
+
+    try:
+        model = genai.GenerativeModel(model_name=LLM_MODEL)
+        response = model.generate_content(prompt)
+        standalone_query = response.text.strip().strip('"').strip("'")
+        if standalone_query and len(standalone_query) > 0:
+            return standalone_query
+    except Exception as e:
+        print(f"⚠️ Query Rephrasing failed: {e}")
+        
+    return query_text
+
+def query_rag(collection, query_text, num_results=3, paper_id=None, published_after=None, min_pages=None, bm25=None, bm25_chunks=None, chat_history=None):
+    original_user_query = query_text
+
+    # 0. Conversational Contextualization (if multi-turn history is present)
+    if chat_history and len(chat_history) > 0:
+        rephrased = rephrase_query_with_history(query_text, chat_history)
+        if rephrased != query_text:
+            print(f"🔄 [CONVERSATIONAL REPHRASING]:")
+            print(f"   Follow-up Query:  '{query_text}'")
+            print(f"   Standalone Query: '{rephrased}'")
+            query_text = rephrased
+
     # Auto-extract filters if none are manually specified
     if not paper_id and not published_after and not min_pages:
         filters = extract_metadata_filters(query_text)
@@ -603,6 +661,15 @@ def query_rag(collection, query_text, num_results=3, paper_id=None, published_af
         
     context = "\n---\n".join(context_blocks)
     
+    # Format chat history for prompt if present
+    history_context = ""
+    if chat_history and len(chat_history) > 0:
+        formatted_turns = []
+        for msg in chat_history[-4:]:
+            role = "User" if msg.get("role") in ["user", "human"] else "Assistant"
+            formatted_turns.append(f"{role}: {msg.get('content', '')}")
+        history_context = "Conversation History:\n" + "\n".join(formatted_turns) + "\n\n"
+
     # Construct prompt
     prompt = f"""You are a helpful and precise research assistant specializing in scientific literature.
 Answer the user's question using ONLY the provided search results from arXiv research papers.
@@ -613,10 +680,10 @@ Requirements:
 3. Be professional, detailed, and structure your answer logically.
 4. Cite your sources in the text using [Source 1], [Source 2], etc.
 
-Context:
+{history_context}Context:
 {context}
 
-Question: {query_text}
+Question: {original_user_query}
 
 Answer:"""
 
@@ -662,6 +729,7 @@ def interactive_chat(collection, paper_id=None, published_after=None, min_pages=
         print(f"⚙️ Active Filters: {', '.join(active_filters)}")
     print("Ask any question based on your downloaded arXiv papers.\n")
     
+    chat_history = []
     while True:
         try:
             query_text = input("RAG Chat > ").strip()
@@ -677,9 +745,14 @@ def interactive_chat(collection, paper_id=None, published_after=None, min_pages=
                 query_text, 
                 paper_id=paper_id, 
                 published_after=published_after, 
-                min_pages=min_pages
+                min_pages=min_pages,
+                chat_history=chat_history
             )
             print_result(query_text, answer, sources)
+            
+            # Maintain multi-turn history
+            chat_history.append({"role": "user", "content": query_text})
+            chat_history.append({"role": "assistant", "content": answer})
             
         except KeyboardInterrupt:
             print("\nGoodbye!")

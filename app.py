@@ -47,6 +47,7 @@ class QueryRequest(BaseModel):
     published_after: Optional[str] = None
     min_pages: Optional[int] = None
     num_results: Optional[int] = 3
+    chat_history: Optional[list] = None
 
 @app.get("/api/papers")
 def get_papers():
@@ -105,7 +106,8 @@ def post_query(req: QueryRequest):
             published_after=req.published_after,
             min_pages=req.min_pages,
             bm25=bm25,
-            bm25_chunks=bm25_chunks
+            bm25_chunks=bm25_chunks,
+            chat_history=req.chat_history
         )
         return {"answer": answer, "sources": sources}
     except Exception as e:
