@@ -20,6 +20,7 @@ data/chroma_db_backup/
 data/papers_metadata.json
 data/paper_chunks.json
 data/semantic_cache.json
+data/knowledge_graph.json
 
 
 # Logs & Temporary Files

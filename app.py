@@ -146,6 +146,30 @@ def post_eval_run():
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.get("/api/graph/stats")
+def get_graph_stats():
+    from knowledge_graph import get_knowledge_graph
+    kg = get_knowledge_graph()
+    return kg.stats()
+
+@app.get("/api/graph/paper/{paper_id}")
+def get_graph_paper(paper_id: str):
+    from knowledge_graph import get_knowledge_graph
+    kg = get_knowledge_graph()
+    network = kg.get_paper_network(paper_id)
+    if not network:
+        raise HTTPException(status_code=404, detail=f"Paper {paper_id} not found in Knowledge Graph")
+    return network
+
+@app.get("/api/graph/author/{author_name}")
+def get_graph_author(author_name: str):
+    from knowledge_graph import get_knowledge_graph
+    kg = get_knowledge_graph()
+    network = kg.get_author_network(author_name)
+    if not network:
+        raise HTTPException(status_code=404, detail=f"Author {author_name} not found in Knowledge Graph")
+    return network
+
 # Setup static folders
 static_dir = os.path.join(os.path.dirname(__file__), "static")
 os.makedirs(static_dir, exist_ok=True)

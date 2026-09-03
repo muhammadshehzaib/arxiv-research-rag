@@ -10,6 +10,7 @@ import json
 import numpy as np
 from rank_bm25 import BM25Okapi
 from semantic_cache import get_semantic_cache
+from knowledge_graph import get_knowledge_graph
 
 REFUSAL_CONFIDENCE_THRESHOLD = float(os.getenv("REFUSAL_THRESHOLD", "0.70"))
 
@@ -705,6 +706,23 @@ def query_rag(collection, query_text, num_results=3, paper_id=None, published_af
         
     context = "\n---\n".join(context_blocks)
     
+    # --- GRAPH RAG ENRICHMENT (Knowledge Graph Context) ---
+    kg = get_knowledge_graph()
+    retrieved_pids = [s["paper_id"] for s in sources if s.get("paper_id")]
+    graph_context = ""
+    if kg.is_loaded and retrieved_pids:
+        graph_context = kg.get_graph_context_for_rag(retrieved_pids)
+        for s in sources:
+            net = kg.get_paper_network(s["paper_id"])
+            if net:
+                s["citations_out"] = net.get("citations_out", [])
+                s["cited_by"] = net.get("cited_by", [])
+                s["collaborators"] = net.get("top_collaborators", [])
+                
+    graph_prompt_block = ""
+    if graph_context:
+        graph_prompt_block = f"\nKnowledge Graph Relationships & Citation Network:\n{graph_context}\n"
+
     # Format chat history for prompt if present
     history_context = ""
     if chat_history and len(chat_history) > 0:
@@ -716,17 +734,18 @@ def query_rag(collection, query_text, num_results=3, paper_id=None, published_af
 
     # Construct prompt
     prompt = f"""You are a helpful and precise research assistant specializing in scientific literature.
-Answer the user's question using ONLY the provided search results from arXiv research papers.
+Answer the user's question using ONLY the provided search results and Knowledge Graph citation network from arXiv research papers.
 
 Requirements:
-1. Ground your answer strictly on the provided Context. Do not make up facts or use external training knowledge.
+1. Ground your answer strictly on the provided Context and Knowledge Graph relationships. Do not make up facts or use external training knowledge.
 2. If the Context does not contain enough information to answer the question, state that clearly (e.g. "Based on the retrieved context, I cannot answer this because...").
-3. Be professional, detailed, and structure your answer logically.
-4. Cite your sources in the text using [Source 1], [Source 2], etc.
+3. When relevant, reference citation relationships (e.g. "Paper X cites Paper Y" or "authored by the same research group").
+4. Be professional, detailed, and structure your answer logically.
+5. Cite your sources in the text using [Source 1], [Source 2], etc.
 
 {history_context}Context:
 {context}
-
+{graph_prompt_block}
 Question: {original_user_query}
 
 Answer:"""
