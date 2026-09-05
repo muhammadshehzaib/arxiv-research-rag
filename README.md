@@ -91,6 +91,7 @@ The Python implementation uses the `arxiv` client library, `pypdf` for text extr
 ---
 
 ## Change Log & Execution History
+- [2026-09-05] Fixed fail-open vulnerability in query_rag.py by enforcing fail-closed refusal when no reranker is active instead of generating mock scores.
 - [2026-09-04] Implemented On-Device Academic Knowledge Graph & Graph RAG with paper-to-paper citations, author collaboration networks, and multi-hop traversal.
 - [2026-09-03] Implemented The Refusal Ladder (Multi-Tier Confidence Guardrail) with Sigmoid Cross-Encoder scoring to abort generation on out-of-domain queries and eliminate hallucinations.
 - [2026-09-01] Added Multi-Turn Conversational Memory with Query Rephrasing to automatically contextualize pronoun-heavy follow-up questions.

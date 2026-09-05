@@ -33,12 +33,16 @@ class Reranker:
         self.cohere_client = None
         self.flashrank_client = None
         self.sentence_transformers_client = None
+        self.provider = None
+        self.is_active = False
         
         # 1. Try to initialize Cohere Reranker if API key is provided
         if self.cohere_api_key and self.cohere_api_key != "your_cohere_api_key_here":
             if HAS_COHERE:
                 try:
                     self.cohere_client = cohere.Client(api_key=self.cohere_api_key)
+                    self.provider = "cohere"
+                    self.is_active = True
                     print("🚀 Cohere Rerank client initialized successfully.")
                 except Exception as e:
                     print(f"⚠️ Failed to initialize Cohere client: {e}")
@@ -46,22 +50,26 @@ class Reranker:
                 print("⚠️ Cohere package is missing but COHERE_API_KEY is configured.")
                 
         # 2. Try to initialize local Sentence-Transformers Cross-Encoder
-        if not self.cohere_client:
+        if not self.is_active:
             try:
                 from sentence_transformers import CrossEncoder
                 print("🤖 Initializing local Sentence-Transformers Cross-Encoder (ms-marco-MiniLM-L-6-v2)...")
                 self.sentence_transformers_client = CrossEncoder('cross-encoder/ms-marco-MiniLM-L-6-v2', max_length=512)
+                self.provider = "sentence-transformers"
+                self.is_active = True
                 print("✅ Cross-Encoder reranker initialized successfully.")
             except Exception as e:
                 print(f"⚠️ Local Cross-Encoder not available or failed to load: {e}")
                 
         # 3. Fallback: Try to initialize local FlashRank if Cross-Encoder is not active
-        if not self.cohere_client and not self.sentence_transformers_client:
+        if not self.is_active:
             if HAS_FLASHRANK:
                 try:
                     model_name = os.getenv("FLASHRANK_MODEL", "ms-marco-MiniLM-L-12-v2")
                     print(f"🤖 Initializing local FlashRank with model: {model_name}...")
                     self.flashrank_client = Ranker(model_name=model_name)
+                    self.provider = "flashrank"
+                    self.is_active = True
                     print("✅ FlashRank reranker initialized successfully.")
                 except Exception as e:
                     print(f"⚠️ Failed to initialize FlashRank: {e}")
@@ -140,10 +148,10 @@ class Reranker:
             except Exception as e:
                 print(f"⚠️ FlashRank reranking failed: {e}. Falling back to default/local ordering.")
                 
-        # Graceful fallback: just add a mock score based on index/RRF and return
-        print("⚠️ No active reranker provider. Returning results in RRF order.")
+        # Fail-closed fallback: No active reranker provider
+        print("⚠️ No active reranker provider. Operating in fail-closed safety mode.")
         for idx, p in enumerate(passages):
-            p["score"] = 1.0 / (idx + 1)
+            p["score"] = -10.0  # Guarantees failure of confidence threshold (Sigmoid(-10) ~ 0.0%)
         return passages
 
 # Global lazy-loaded reranker
@@ -592,6 +600,15 @@ def query_rag(collection, query_text, num_results=3, paper_id=None, published_af
         
     # --- CROSS-ENCODER RERANKING ---
     reranker = get_reranker()
+    if not reranker.is_active:
+        refusal_msg = (
+            "🛡️ [REFUSAL LADDER ACTIVATED - Unverified Confidence]\n\n"
+            "No active reranker provider (Cohere, Sentence-Transformers, or FlashRank) is loaded to evaluate confidence scores.\n"
+            "Aborted LLM generation in fail-closed safety mode to prevent hallucinations."
+        )
+        print(f"\n{refusal_msg}\n")
+        return refusal_msg, []
+
     reranked_passages = reranker.rerank(query_text, passages)
     
     # --- PARENT CONTEXT RETRIEVAL & DE-DUPLICATION ---
