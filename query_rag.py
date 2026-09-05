@@ -368,9 +368,31 @@ Standalone Search Query:"""
     return query_text
 
 def query_rag(collection, query_text, num_results=3, paper_id=None, published_after=None, min_pages=None, bm25=None, bm25_chunks=None, chat_history=None):
+    # 1. Start timer immediately at the entry point for 100% honest latency accounting
+    start_time = time.time()
     original_user_query = query_text
 
-    # 0. Conversational Contextualization (if multi-turn history is present)
+    # 2. Check Semantic Cache FIRST before running any expensive LLM calls (e.g. filter extraction)
+    manual_filters = {
+        "paper_id": paper_id,
+        "published_after": published_after,
+        "min_pages": min_pages
+    }
+    
+    cache = get_semantic_cache()
+    is_hit, cached_answer, cached_sources, sim_score, matched_query = cache.lookup(query_text, filters=manual_filters)
+    if is_hit:
+        elapsed_ms = (time.time() - start_time) * 1000
+        print(f"\n⚡ [SEMANTIC CACHE HIT] (Similarity: {sim_score * 100:.1f}% to cached query: '{matched_query}')")
+        print(f"⏱️ Response Latency: {elapsed_ms:.1f}ms (LLM API Cost: $0.00)")
+        return cached_answer, cached_sources
+    else:
+        if sim_score > 0.0:
+            print(f"ℹ️ [SEMANTIC CACHE MISS] (Best candidate similarity: {sim_score * 100:.1f}% < threshold). Running full pipeline...")
+        else:
+            print(f"ℹ️ [SEMANTIC CACHE MISS] (No matching cache entry). Running full pipeline...")
+
+    # 3. Conversational Contextualization (only executed on cache miss)
     if chat_history and len(chat_history) > 0:
         rephrased = rephrase_query_with_history(query_text, chat_history)
         if rephrased != query_text:
@@ -378,8 +400,16 @@ def query_rag(collection, query_text, num_results=3, paper_id=None, published_af
             print(f"   Follow-up Query:  '{query_text}'")
             print(f"   Standalone Query: '{rephrased}'")
             query_text = rephrased
+            
+            # Check cache again with the rephrased standalone query
+            is_hit_rep, cached_ans_rep, cached_src_rep, sim_rep, matched_rep = cache.lookup(query_text, filters=manual_filters)
+            if is_hit_rep:
+                elapsed_ms = (time.time() - start_time) * 1000
+                print(f"\n⚡ [SEMANTIC CACHE HIT via Rephrased Query] (Similarity: {sim_rep * 100:.1f}% to cached query: '{matched_rep}')")
+                print(f"⏱️ Response Latency: {elapsed_ms:.1f}ms (LLM Generation Saved)")
+                return cached_ans_rep, cached_src_rep
 
-    # Auto-extract filters if none are manually specified
+    # 4. Auto-extract filters if none are manually specified (only executed on cache miss)
     if not paper_id and not published_after and not min_pages:
         filters = extract_metadata_filters(query_text)
         clean_q = filters["clean_query"]
@@ -406,26 +436,12 @@ def query_rag(collection, query_text, num_results=3, paper_id=None, published_af
             # Use the cleaned search query for retrieving embeddings/words
             query_text = clean_q
 
-    # --- SEMANTIC CACHE LOOKUP ---
-    start_time = time.time()
+    # Active filters to be used by Chroma DB and persisted to cache
     active_filters = {
         "paper_id": paper_id,
         "published_after": published_after,
         "min_pages": min_pages
     }
-    
-    cache = get_semantic_cache()
-    is_hit, cached_answer, cached_sources, sim_score, matched_query = cache.lookup(query_text, filters=active_filters)
-    if is_hit:
-        elapsed_ms = (time.time() - start_time) * 1000
-        print(f"\n⚡ [SEMANTIC CACHE HIT] (Similarity: {sim_score * 100:.1f}% to cached query: '{matched_query}')")
-        print(f"⏱️ Response Latency: {elapsed_ms:.1f}ms (LLM API Cost: $0.00)")
-        return cached_answer, cached_sources
-    else:
-        if sim_score > 0.0:
-            print(f"ℹ️ [SEMANTIC CACHE MISS] (Best candidate similarity: {sim_score * 100:.1f}% < threshold). Running full pipeline...")
-        else:
-            print(f"ℹ️ [SEMANTIC CACHE MISS] (Empty cache). Running full pipeline...")
 
     # 1. Fetch BM25 index if not passed
     if bm25 is None or bm25_chunks is None:

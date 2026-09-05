@@ -91,6 +91,7 @@ The Python implementation uses the `arxiv` client library, `pypdf` for text extr
 ---
 
 ## Change Log & Execution History
+- [2026-09-06] Relocated start_time and semantic cache evaluation to the entry point of query_rag.py, preventing unneeded LLM filter extraction calls on cache hits and ensuring honest latency metrics.
 - [2026-09-05] Fixed fail-open vulnerability in query_rag.py by enforcing fail-closed refusal when no reranker is active instead of generating mock scores.
 - [2026-09-04] Implemented On-Device Academic Knowledge Graph & Graph RAG with paper-to-paper citations, author collaboration networks, and multi-hop traversal.
 - [2026-09-03] Implemented The Refusal Ladder (Multi-Tier Confidence Guardrail) with Sigmoid Cross-Encoder scoring to abort generation on out-of-domain queries and eliminate hallucinations.
