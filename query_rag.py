@@ -163,13 +163,9 @@ def get_reranker():
     return _reranker_instance
 
 
-# Ensure stdout/stderr use UTF-8 encoding on Windows
-if sys.platform.startswith("win"):
-    try:
-        sys.stdout.reconfigure(encoding='utf-8')
-        sys.stderr.reconfigure(encoding='utf-8')
-    except Exception:
-        pass
+from utils import setup_windows_encoding, date_to_int, tokenize_text
+
+setup_windows_encoding()
 
 # Load environment variables
 load_dotenv()
@@ -177,28 +173,6 @@ load_dotenv()
 # Global cache for lazy loading in CLI
 _bm25_global = None
 _bm25_chunks_global = None
-
-def date_to_int(date_str):
-    """
-    Converts ISO date strings (e.g. '2024-03-15', '2024-03', '2024') to an integer YYYYMMDD.
-    """
-    if not date_str:
-        return 0
-    digits = "".join(c for c in str(date_str) if c.isdigit())
-    if len(digits) >= 8:
-        return int(digits[:8])
-    elif len(digits) == 6:
-        return int(digits + "01")
-    elif len(digits) == 4:
-        return int(digits + "0101")
-    return 0
-
-def tokenize_text(text):
-    """
-    Standard alphanumeric lowercasing tokenizer for BM25.
-    """
-    text = text.lower()
-    return re.findall(r'[a-z0-9]+', text)
 
 def init_bm25(chunks_path=os.path.join("data", "paper_chunks.json")):
     """

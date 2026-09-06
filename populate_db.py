@@ -5,14 +5,9 @@ import sys
 import chromadb
 import google.generativeai as genai
 from dotenv import load_dotenv
+from utils import setup_windows_encoding, date_to_int
 
-# Ensure stdout/stderr use UTF-8 encoding on Windows
-if sys.platform.startswith("win"):
-    try:
-        sys.stdout.reconfigure(encoding='utf-8')
-        sys.stderr.reconfigure(encoding='utf-8')
-    except Exception:
-        pass
+setup_windows_encoding()
 
 # Load environment variables
 load_dotenv()
@@ -31,18 +26,6 @@ def init_gemini():
             "Please add your actual Gemini API key to .env before running this script."
         )
     genai.configure(api_key=GEMINI_API_KEY)
-
-def date_to_int(date_str):
-    if not date_str:
-        return 0
-    digits = "".join(c for c in str(date_str) if c.isdigit())
-    if len(digits) >= 8:
-        return int(digits[:8])
-    elif len(digits) == 6:
-        return int(digits + "01")
-    elif len(digits) == 4:
-        return int(digits + "0101")
-    return 0
 
 def load_chunks():
     chunks_path = os.path.join("data", "paper_chunks.json")

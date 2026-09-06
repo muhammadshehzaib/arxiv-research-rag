@@ -4,15 +4,9 @@ import json
 import re
 import time
 import arxiv
+from utils import setup_windows_encoding, clean_text, date_to_int
 
-# Ensure stdout/stderr use UTF-8 encoding on Windows
-if sys.platform.startswith("win"):
-    try:
-        sys.stdout.reconfigure(encoding='utf-8')
-        sys.stderr.reconfigure(encoding='utf-8')
-    except Exception:
-        pass
-
+setup_windows_encoding()
 
 """
 Python PDF Text Extractor & Chunker for RAG
@@ -30,18 +24,6 @@ PARENT_CHUNK_SIZE = 800  # Words per parent chunk
 PARENT_OVERLAP = 100     # Overlap between parent chunks
 CHILD_CHUNK_SIZE = 150   # Words per child chunk
 CHILD_OVERLAP = 20       # Overlap between child chunks
-
-
-def clean_text(text):
-    # Remove surrogate characters (U+D800 to U+DFFF) which break tokenizers in Rust-based python packages
-    text = "".join(c for c in text if not (0xD800 <= ord(c) <= 0xDFFF))
-    # Remove hyphenated linebreaks
-    text = re.sub(r'(\w+)-\s*\n\s*(\w+)', r'\1\2', text)
-    # Replace newlines with spaces
-    text = re.sub(r'\r?\n|\r', ' ', text)
-    # Collapse multiple spaces
-    text = re.sub(r'\s+', ' ', text)
-    return text.strip()
 
 def chunk_text(text, chunk_size=CHUNK_SIZE, overlap=OVERLAP):
     words = [w for w in text.split(' ') if w]
@@ -70,18 +52,6 @@ def chunk_text(text, chunk_size=CHUNK_SIZE, overlap=OVERLAP):
             break
 
     return chunks
-
-def date_to_int(date_str):
-    if not date_str:
-        return 0
-    digits = "".join(c for c in str(date_str) if c.isdigit())
-    if len(digits) >= 8:
-        return int(digits[:8])
-    elif len(digits) == 6:
-        return int(digits + "01")
-    elif len(digits) == 4:
-        return int(digits + "0101")
-    return 0
 
 def fetch_missing_metadata(paper_ids):
     """

@@ -4,13 +4,9 @@ import json
 import re
 from collections import defaultdict
 from typing import Dict, List, Set, Any, Optional
+from utils import setup_windows_encoding
 
-if sys.platform.startswith("win"):
-    try:
-        sys.stdout.reconfigure(encoding='utf-8')
-        sys.stderr.reconfigure(encoding='utf-8')
-    except Exception:
-        pass
+setup_windows_encoding()
 
 GRAPH_FILE_PATH = os.path.join("data", "knowledge_graph.json")
 METADATA_FILE_PATH = os.path.join("data", "papers_metadata.json")
