@@ -71,6 +71,18 @@ def chunk_text(text, chunk_size=CHUNK_SIZE, overlap=OVERLAP):
 
     return chunks
 
+def date_to_int(date_str):
+    if not date_str:
+        return 0
+    digits = "".join(c for c in str(date_str) if c.isdigit())
+    if len(digits) >= 8:
+        return int(digits[:8])
+    elif len(digits) == 6:
+        return int(digits + "01")
+    elif len(digits) == 4:
+        return int(digits + "0101")
+    return 0
+
 def fetch_missing_metadata(paper_ids):
     """
     Fetches metadata for a list of arXiv paper IDs.
@@ -307,6 +319,7 @@ def main():
                     "title": paper['title'],
                     "authors": paper['authors'],
                     "published": paper['published'],
+                    "published_int": date_to_int(paper.get('published', '')),
                     "pdf_url": pdf_url,
                     "total_pages": total_pages,
                     "chunk_index": child_global_index,

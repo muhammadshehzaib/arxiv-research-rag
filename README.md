@@ -91,6 +91,7 @@ The Python implementation uses the `arxiv` client library, `pypdf` for text extr
 ---
 
 ## Change Log & Execution History
+- [2026-09-07] Fixed asymmetric post-filtering bug by adding numeric published_int metadata and enabling true database pre-filtering for published_after in Chroma DB and BM25.
 - [2026-09-06] Relocated start_time and semantic cache evaluation to the entry point of query_rag.py, preventing unneeded LLM filter extraction calls on cache hits and ensuring honest latency metrics.
 - [2026-09-05] Fixed fail-open vulnerability in query_rag.py by enforcing fail-closed refusal when no reranker is active instead of generating mock scores.
 - [2026-09-04] Implemented On-Device Academic Knowledge Graph & Graph RAG with paper-to-paper citations, author collaboration networks, and multi-hop traversal.

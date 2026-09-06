@@ -32,6 +32,18 @@ def init_gemini():
         )
     genai.configure(api_key=GEMINI_API_KEY)
 
+def date_to_int(date_str):
+    if not date_str:
+        return 0
+    digits = "".join(c for c in str(date_str) if c.isdigit())
+    if len(digits) >= 8:
+        return int(digits[:8])
+    elif len(digits) == 6:
+        return int(digits + "01")
+    elif len(digits) == 4:
+        return int(digits + "0101")
+    return 0
+
 def load_chunks():
     chunks_path = os.path.join("data", "paper_chunks.json")
     if not os.path.exists(chunks_path):
@@ -148,11 +160,13 @@ def populate_database(rebuild=False):
         metadatas = []
         for chunk in batch:
             authors_str = ", ".join(chunk["authors"]) if isinstance(chunk["authors"], list) else str(chunk.get("authors", ""))
+            pub_date = chunk.get("published", "")
             meta = {
                 "paper_id": chunk.get("paper_id", chunk.get("paperId", "")),
                 "title": chunk.get("title", ""),
                 "authors": authors_str,
-                "published": chunk.get("published", ""),
+                "published": pub_date,
+                "published_int": date_to_int(pub_date),
                 "pdf_url": chunk.get("pdf_url", chunk.get("pdfUrl", "")),
                 "total_pages": int(chunk.get("total_pages", 0)),
                 "chunk_index": int(chunk.get("chunk_index", 0)),

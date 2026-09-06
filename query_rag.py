@@ -178,6 +178,21 @@ load_dotenv()
 _bm25_global = None
 _bm25_chunks_global = None
 
+def date_to_int(date_str):
+    """
+    Converts ISO date strings (e.g. '2024-03-15', '2024-03', '2024') to an integer YYYYMMDD.
+    """
+    if not date_str:
+        return 0
+    digits = "".join(c for c in str(date_str) if c.isdigit())
+    if len(digits) >= 8:
+        return int(digits[:8])
+    elif len(digits) == 6:
+        return int(digits + "01")
+    elif len(digits) == 4:
+        return int(digits + "0101")
+    return 0
+
 def tokenize_text(text):
     """
     Standard alphanumeric lowercasing tokenizer for BM25.
@@ -453,6 +468,10 @@ def query_rag(collection, query_text, num_results=3, paper_id=None, published_af
         where_clauses.append({"paper_id": {"$eq": paper_id}})
     if min_pages is not None:
         where_clauses.append({"total_pages": {"$gte": int(min_pages)}})
+    if published_after:
+        pub_int = date_to_int(published_after)
+        if pub_int > 0:
+            where_clauses.append({"published_int": {"$gte": pub_int}})
         
     where = None
     if len(where_clauses) == 1:
@@ -487,11 +506,6 @@ def query_rag(collection, query_text, num_results=3, paper_id=None, published_af
             ids = results['ids'][0]
             
             for doc, meta, dist, cid in zip(docs, metadatas, distances, ids):
-                # Chroma only allows numeric filters, so handle published_after date filtering here
-                if published_after:
-                    pub_date = meta.get("published", "")
-                    if pub_date < published_after:
-                        continue
                 dense_candidates.append({
                     "chunk_id": cid,
                     "text": doc,
@@ -519,8 +533,9 @@ def query_rag(collection, query_text, num_results=3, paper_id=None, published_af
                 if min_pages is not None and int(chunk.get("total_pages", 0)) < int(min_pages):
                     continue
                 if published_after:
-                    pub_date = chunk.get("published", "")
-                    if pub_date < published_after:
+                    pub_int = date_to_int(published_after)
+                    chunk_pub_int = chunk.get("published_int") or date_to_int(chunk.get("published", ""))
+                    if chunk_pub_int < pub_int:
                         continue
                 scored_chunks.append((chunk, score, idx))
                 
