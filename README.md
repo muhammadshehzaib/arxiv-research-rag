@@ -91,6 +91,7 @@ The Python implementation uses the `arxiv` client library, `pypdf` for text extr
 ---
 
 ## Change Log & Execution History
+- [2026-09-08] Eliminated redundant duplicate embedding API calls per query by computing query_vector once upfront and reusing it across semantic cache lookup, Chroma DB dense retrieval, and semantic cache store.
 - [2026-09-07] Refactored duplicate utility functions into centralized utils.py module (date_to_int, clean_text, tokenize_text, setup_windows_encoding) adhering to the DRY principle.
 - [2026-09-07] Fixed asymmetric post-filtering bug by adding numeric published_int metadata and enabling true database pre-filtering for published_after in Chroma DB and BM25.
 - [2026-09-06] Relocated start_time and semantic cache evaluation to the entry point of query_rag.py, preventing unneeded LLM filter extraction calls on cache hits and ensuring honest latency metrics.

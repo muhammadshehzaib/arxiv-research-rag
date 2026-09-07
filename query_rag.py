@@ -384,7 +384,17 @@ def query_rag(collection, query_text, num_results=3, paper_id=None, published_af
     }
     
     cache = get_semantic_cache()
-    is_hit, cached_answer, cached_sources, sim_score, matched_query = cache.lookup(query_text, filters=manual_filters)
+    # Compute query embedding once upfront to avoid duplicate API calls
+    query_vector = None
+    if EMBEDDING_PROVIDER != "local":
+        try:
+            query_vector = get_query_embedding(query_text)
+        except Exception:
+            query_vector = None
+
+    is_hit, cached_answer, cached_sources, sim_score, matched_query = cache.lookup(
+        query_text, query_embedding=query_vector, filters=manual_filters
+    )
     if is_hit:
         elapsed_ms = (time.time() - start_time) * 1000
         print(f"\n⚡ [SEMANTIC CACHE HIT] (Similarity: {sim_score * 100:.1f}% to cached query: '{matched_query}')")
@@ -405,8 +415,17 @@ def query_rag(collection, query_text, num_results=3, paper_id=None, published_af
             print(f"   Standalone Query: '{rephrased}'")
             query_text = rephrased
             
+            # Recompute embedding for the rephrased query
+            if EMBEDDING_PROVIDER != "local":
+                try:
+                    query_vector = get_query_embedding(query_text)
+                except Exception:
+                    query_vector = None
+
             # Check cache again with the rephrased standalone query
-            is_hit_rep, cached_ans_rep, cached_src_rep, sim_rep, matched_rep = cache.lookup(query_text, filters=manual_filters)
+            is_hit_rep, cached_ans_rep, cached_src_rep, sim_rep, matched_rep = cache.lookup(
+                query_text, query_embedding=query_vector, filters=manual_filters
+            )
             if is_hit_rep:
                 elapsed_ms = (time.time() - start_time) * 1000
                 print(f"\n⚡ [SEMANTIC CACHE HIT via Rephrased Query] (Similarity: {sim_rep * 100:.1f}% to cached query: '{matched_rep}')")
@@ -438,7 +457,9 @@ def query_rag(collection, query_text, num_results=3, paper_id=None, published_af
             print(f"   Cleaned Search:  '{clean_q}'")
             print(f"   Auto-applied:    {', '.join(detected)}")
             # Use the cleaned search query for retrieving embeddings/words
-            query_text = clean_q
+            if clean_q != query_text:
+                query_text = clean_q
+                query_vector = None
 
     # Active filters to be used by Chroma DB and persisted to cache
     active_filters = {
@@ -481,7 +502,8 @@ def query_rag(collection, query_text, num_results=3, paper_id=None, published_af
                 where=where
             )
         else:
-            query_vector = get_query_embedding(query_text)
+            if query_vector is None:
+                query_vector = get_query_embedding(query_text)
             results = collection.query(
                 query_embeddings=[query_vector],
                 n_results=fetch_results,
@@ -794,7 +816,7 @@ Answer:"""
         generated_answer = response.text
         
         # Store in Semantic Cache for future identical / paraphrased queries
-        cache.store(query_text, generated_answer, sources, filters=active_filters)
+        cache.store(query_text, generated_answer, sources, query_embedding=query_vector, filters=active_filters)
         elapsed_ms = (time.time() - start_time) * 1000
         print(f"⏱️ Full Pipeline Latency: {elapsed_ms:.1f}ms (Response Generated & Cached)")
         
