@@ -16,7 +16,7 @@ REFUSAL_CONFIDENCE_THRESHOLD = float(os.getenv("REFUSAL_THRESHOLD", "0.70"))
 
 # Reranker package imports
 try:
-    from flashrank import Ranker
+    from flashrank import Ranker, RerankRequest
     HAS_FLASHRANK = True
 except ImportError:
     HAS_FLASHRANK = False
@@ -129,20 +129,35 @@ class Reranker:
                     flash_passages.append({
                         "id": p["id"],
                         "text": p["text"],
-                        "metadata": p.get("metadata", {}),
-                        "rrf_score": p.get("rrf_score", 0.0)
+                        "meta": {
+                            "metadata": p.get("metadata", {}),
+                            "rrf_score": p.get("rrf_score", 0.0)
+                        }
                     })
                 
-                results = self.flashrank_client.rerank(query=query, passages=flash_passages)
+                # FlashRank v0.2+ API: pass a RerankRequest object
+                rerank_request = RerankRequest(query=query, passages=flash_passages)
+                results = self.flashrank_client.rerank(rerank_request)
                 
                 reranked = []
                 for res in results:
+                    # Results are objects with attributes in newer FlashRank versions
+                    if hasattr(res, 'id'):
+                        rid      = res.id
+                        rtext    = res.text
+                        rmeta    = res.meta if hasattr(res, 'meta') else {}
+                        rscore   = res.score if hasattr(res, 'score') else 0.0
+                    else:
+                        rid      = res.get("id")
+                        rtext    = res.get("text", "")
+                        rmeta    = res.get("meta", {})
+                        rscore   = res.get("score", 0.0)
                     reranked.append({
-                        "id": res["id"],
-                        "text": res["text"],
-                        "metadata": res["metadata"],
-                        "rrf_score": res["rrf_score"],
-                        "score": res["score"]
+                        "id":       rid,
+                        "text":     rtext,
+                        "metadata": rmeta.get("metadata", {}) if isinstance(rmeta, dict) else {},
+                        "rrf_score": rmeta.get("rrf_score", 0.0) if isinstance(rmeta, dict) else 0.0,
+                        "score":    rscore
                     })
                 return reranked
             except Exception as e:
