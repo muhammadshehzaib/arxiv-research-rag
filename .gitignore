@@ -21,6 +21,7 @@ data/papers_metadata.json
 data/paper_chunks.json
 data/semantic_cache.json
 data/knowledge_graph.json
+data/bm25_fts.db*
 
 
 # Logs & Temporary Files

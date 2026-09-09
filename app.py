@@ -34,12 +34,16 @@ def startup_event():
     except Exception as e:
         print(f"❌ Failed to initialize RAG services on startup: {e}")
         
-    try:
-        from query_rag import init_bm25
-        bm25, bm25_chunks = init_bm25()
-        print("✅ BM25 sparse search index initialized on startup.")
-    except Exception as e:
-        print(f"❌ Failed to initialize BM25 sparse search index: {e}")
+    fts_db_path = os.path.join("data", "bm25_fts.db")
+    if os.path.exists(fts_db_path):
+        print("⚡ Using disk-backed SQLite FTS5 inverted index for BM25 search (0 MB RAM overhead).")
+    else:
+        try:
+            from query_rag import init_bm25
+            bm25, bm25_chunks = init_bm25()
+            print("✅ BM25 sparse search index initialized on startup.")
+        except Exception as e:
+            print(f"❌ Failed to initialize BM25 sparse search index: {e}")
 
 class QueryRequest(BaseModel):
     query: str

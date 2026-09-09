@@ -192,6 +192,14 @@ def populate_database(rebuild=False):
     print(f"\n🎉 Database population complete in {duration:.2f} seconds!")
     print(f"👉 Total items stored in '{COLLECTION_NAME}': {collection.count()}")
 
+    # Sync SQLite FTS5 inverted index with any new chunks
+    try:
+        from build_fts_index import build_index
+        print("\n🔄 Synchronizing SQLite FTS5 BM25 index...")
+        build_index()
+    except Exception as fts_err:
+        print(f"⚠️ Could not sync SQLite FTS5 index: {fts_err}")
+
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description="Populate the Chroma Vector Database.")

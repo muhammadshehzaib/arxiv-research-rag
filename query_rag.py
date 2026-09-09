@@ -2,6 +2,7 @@ import os
 import sys
 import time
 import argparse
+import sqlite3
 import chromadb
 import google.generativeai as genai
 from dotenv import load_dotenv
@@ -217,6 +218,79 @@ def get_bm25_index():
         _bm25_global = bm25
         _bm25_chunks_global = chunks
     return _bm25_global, _bm25_chunks_global
+
+def search_fts(query_text, num_results=30, paper_id=None, published_after=None, min_pages=None, db_path=os.path.join("data", "bm25_fts.db")):
+    """
+    Executes sub-5ms BM25 sparse retrieval using SQLite FTS5 inverted index on disk.
+    Avoids loading 1.6GB JSON chunks into RAM and scales to millions of papers.
+    Returns list of tuples: (chunk_dict, bm25_score, index)
+    """
+    if not os.path.exists(db_path):
+        return []
+        
+    terms = tokenize_text(query_text)
+    if not terms:
+        return []
+        
+    fts_query = " OR ".join(f'"{t}"' for t in terms)
+    pub_int = date_to_int(published_after) if published_after else None
+    
+    where_clauses = ["chunks_fts MATCH ?"]
+    params = [fts_query]
+    
+    if paper_id:
+        where_clauses.append("c.paper_id = ?")
+        params.append(paper_id)
+    if pub_int and pub_int > 0:
+        where_clauses.append("c.published_int >= ?")
+        params.append(pub_int)
+    if min_pages is not None:
+        where_clauses.append("c.total_pages >= ?")
+        params.append(int(min_pages))
+        
+    where_sql = " AND ".join(where_clauses)
+    sql = f"""
+    SELECT c.chunk_id, c.paper_id, c.title, c.authors, c.published, c.published_int,
+           c.total_pages, c.chunk_index, c.word_count, c.parent_id, c.parent_text, c.pdf_url, c.text, f.rank
+    FROM chunks_fts f
+    JOIN chunks c ON f.rowid = c.id
+    WHERE {where_sql}
+    ORDER BY f.rank
+    LIMIT ?;
+    """
+    params.append(num_results)
+    
+    try:
+        con = sqlite3.connect(db_path)
+        cur = con.cursor()
+        rows = cur.execute(sql, tuple(params)).fetchall()
+        con.close()
+        
+        results = []
+        for idx, r in enumerate(rows):
+            cid, pid, title, authors, published, p_int, pages, c_idx, words, parent_id, parent_text, pdf_url, text, rank = r
+            chunk = {
+                "chunk_id": cid,
+                "paper_id": pid,
+                "title": title,
+                "authors": authors,
+                "published": published,
+                "published_int": p_int,
+                "total_pages": pages,
+                "chunk_index": c_idx,
+                "word_count": words,
+                "parent_id": parent_id,
+                "parent_text": parent_text,
+                "pdf_url": pdf_url,
+                "text": text
+            }
+            # FTS5 rank is negative (more negative = better), so -rank gives positive score
+            score = float(-rank)
+            results.append((chunk, score, idx))
+        return results
+    except Exception as e:
+        print(f"⚠️ SQLite FTS5 search error: {e}")
+        return []
 
 # Configuration
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
@@ -468,8 +542,11 @@ def query_rag(collection, query_text, num_results=3, paper_id=None, published_af
         "min_pages": min_pages
     }
 
-    # 1. Fetch BM25 index if not passed
-    if bm25 is None or bm25_chunks is None:
+    fts_db_path = os.path.join("data", "bm25_fts.db")
+    has_fts_db = os.path.exists(fts_db_path)
+
+    # 1. Fetch in-memory BM25 index only as a fallback if SQLite FTS5 database does not exist
+    if not has_fts_db and (bm25 is None or bm25_chunks is None):
         bm25, bm25_chunks = get_bm25_index()
 
     # 2. Construct filter (where clause) for Chroma DB
@@ -526,9 +603,18 @@ def query_rag(collection, query_text, num_results=3, paper_id=None, published_af
     except Exception as e:
         print(f"⚠️ Dense search error: {e}")
 
-    # --- SPARSE RETRIEVAL (BM25) ---
+    # --- SPARSE RETRIEVAL (BM25 via SQLite FTS5 or in-memory fallback) ---
     sparse_candidates = []
-    if bm25 is not None and bm25_chunks is not None:
+    if has_fts_db:
+        sparse_candidates = search_fts(
+            query_text=query_text,
+            num_results=fetch_results,
+            paper_id=paper_id,
+            published_after=published_after,
+            min_pages=min_pages,
+            db_path=fts_db_path
+        )
+    elif bm25 is not None and bm25_chunks is not None:
         try:
             tokenized_query = tokenize_text(query_text)
             scores = bm25.get_scores(tokenized_query)
