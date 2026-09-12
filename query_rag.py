@@ -12,6 +12,8 @@ import numpy as np
 from rank_bm25 import BM25Okapi
 from semantic_cache import get_semantic_cache
 from knowledge_graph import get_knowledge_graph
+from utils import setup_windows_encoding, date_to_int, tokenize_text, get_corpus_size
+
 
 REFUSAL_CONFIDENCE_THRESHOLD = float(os.getenv("REFUSAL_THRESHOLD", "0.70"))
 
@@ -710,9 +712,10 @@ def query_rag(collection, query_text, num_results=3, paper_id=None, published_af
             
     # Calculate RRF scores
     if not all_candidate_ids:
+        corpus_size = get_corpus_size()
         refusal_msg = (
             "🛡️ [REFUSAL LADDER ACTIVATED - Rung 1: No Matching Documents]\n\n"
-            "Based on the 2,528 arXiv research papers in the database, no documents matching this query or the active filters were found."
+            f"Based on the {corpus_size:,} arXiv research papers in the database, no documents matching this query or the active filters were found."
         )
         print(f"\n{refusal_msg}\n")
         return refusal_msg, []
@@ -808,9 +811,10 @@ def query_rag(collection, query_text, num_results=3, paper_id=None, published_af
     print(f"ℹ️ Reranking finished. Selected {len(unique_parents)} unique parent contexts from {len(reranked_passages)} reranked candidates.")
     
     if not unique_parents:
+        corpus_size = get_corpus_size()
         refusal_msg = (
             "🛡️ [REFUSAL LADDER ACTIVATED - Rung 1: Zero Contexts Selected]\n\n"
-            "Based on the 2,528 arXiv research papers in the database, no valid contexts could be extracted for this query."
+            f"Based on the {corpus_size:,} arXiv research papers in the database, no valid contexts could be extracted for this query."
         )
         print(f"\n{refusal_msg}\n")
         return refusal_msg, []
@@ -864,9 +868,10 @@ def query_rag(collection, query_text, num_results=3, paper_id=None, published_af
         elapsed_ms = (time.time() - start_time) * 1000
         top_title = sources[0]["title"]
         
+        corpus_size = get_corpus_size()
         refusal_msg = (
             f"🛡️ [REFUSAL LADDER ACTIVATED - Insufficient Evidence]\n\n"
-            f"Based on the 2,528 arXiv research papers in the database, there is insufficient evidence "
+            f"Based on the {corpus_size:,} arXiv research papers in the database, there is insufficient evidence "
             f"to reliably answer this question (Retrieval Confidence: {top_confidence * 100:.1f}% < {REFUSAL_CONFIDENCE_THRESHOLD * 100:.0f}% threshold).\n\n"
             f"The corpus focuses on AI, Machine Learning, Computer Vision, NLP, and Cybersecurity.\n"
             f"Closest indexed paper: \"{top_title}\""

@@ -4,6 +4,7 @@ import re
 import json
 import numpy as np
 
+_corpus_size_cache = {"size": None, "mtime": None}
 
 def setup_windows_encoding():
     """
@@ -99,3 +100,28 @@ def to_jsonable(obj):
     if isinstance(obj, np.ndarray):
         return obj.tolist()
     return obj
+
+
+def get_corpus_size():
+    """
+    Returns the current number of papers in the corpus.
+    Caches based on the metadata file's mtime, so it re-reads only when the
+    file actually changes on disk (not on every call).
+    """
+    metadata_path = os.path.join("data", "papers_metadata.json")
+    if not os.path.exists(metadata_path):
+        return 0
+    try:
+        mtime = os.path.getmtime(metadata_path)
+        # If the file hasn't changed since last read, reuse cached value
+        if _corpus_size_cache["mtime"] == mtime and _corpus_size_cache["size"] is not None:
+            return _corpus_size_cache["size"]
+        # File changed (or first call) — read it fresh
+        with open(metadata_path, "r", encoding="utf-8") as f:
+            size = len(json.load(f))
+        _corpus_size_cache["mtime"] = mtime
+        _corpus_size_cache["size"] = size
+        return size
+    except Exception as e:
+        print(f"⚠️ Could not read corpus size: {e}")
+        return 0
