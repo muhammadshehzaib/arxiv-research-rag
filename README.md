@@ -143,3 +143,4 @@ The Python implementation uses the `arxiv` client library, `pypdf` for text extr
 - [2026-08-16] Added requirements.txt, populate_db.py, and query_rag.py to build and run the Python Chroma DB + Gemini RAG system.
 - [2026-08-16] Created the initial README.md explaining project structure, installation, usage, and pipelines.
 
+- [2026-09-12] Fixed pdf_chunker.py: all_parents registry was built in memory but never written to disk; added save of paper_parents.json so parent text is stored once and children reference it by parent_id only.

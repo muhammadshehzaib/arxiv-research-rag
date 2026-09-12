@@ -336,7 +336,13 @@ def main():
     with open(out_path, "w", encoding="utf-8") as f:
         json.dump(all_chunks, f, indent=2)
 
+    # Save the parent registry so children can look up parent text by ID
+    parents_path = os.path.join(data_dir, "paper_parents.json")
+    with open(parents_path, "w", encoding="utf-8") as f:
+        json.dump(all_parents, f, indent=2)
+
     print(f"\n🎉 Successfully chunked {processed_count} papers into {len(all_chunks)} chunks!")
+    print(f"📚 Parent registry saved: {len(all_parents)} parents → {parents_path}")
     print(f"💾 Output saved to: {out_path}")
 
 
