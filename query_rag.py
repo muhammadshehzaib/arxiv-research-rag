@@ -189,6 +189,27 @@ load_dotenv()
 # Global cache for lazy loading in CLI
 _bm25_global = None
 _bm25_chunks_global = None
+_parents_global = None  # parent registry: { parent_id -> {text, ...} }
+
+PARENTS_PATH = os.getenv("PARENTS_PATH", os.path.join("data", "paper_parents.json"))
+
+def get_parent_registry():
+    """Lazily loads paper_parents.json once and caches it in memory."""
+    global _parents_global
+    if _parents_global is not None:
+        return _parents_global
+    if not os.path.exists(PARENTS_PATH):
+        print(f"⚠️ Parent registry not found at {PARENTS_PATH}. Parent context will fall back to child text.")
+        _parents_global = {}
+        return _parents_global
+    try:
+        with open(PARENTS_PATH, "r", encoding="utf-8") as f:
+            _parents_global = json.load(f)
+        print(f"📚 Loaded {len(_parents_global)} parent chunks from registry.")
+    except Exception as e:
+        print(f"❌ Error loading parent registry: {e}")
+        _parents_global = {}
+    return _parents_global
 
 def init_bm25(chunks_path=os.path.join("data", "paper_chunks.json")):
     """
@@ -251,7 +272,7 @@ def search_fts(query_text, num_results=30, paper_id=None, published_after=None, 
     where_sql = " AND ".join(where_clauses)
     sql = f"""
     SELECT c.chunk_id, c.paper_id, c.title, c.authors, c.published, c.published_int,
-           c.total_pages, c.chunk_index, c.word_count, c.parent_id, c.parent_text, c.pdf_url, c.text, f.rank
+           c.total_pages, c.chunk_index, c.word_count, c.parent_id, c.pdf_url, c.text, f.rank
     FROM chunks_fts f
     JOIN chunks c ON f.rowid = c.id
     WHERE {where_sql}
@@ -268,7 +289,7 @@ def search_fts(query_text, num_results=30, paper_id=None, published_after=None, 
         
         results = []
         for idx, r in enumerate(rows):
-            cid, pid, title, authors, published, p_int, pages, c_idx, words, parent_id, parent_text, pdf_url, text, rank = r
+            cid, pid, title, authors, published, p_int, pages, c_idx, words, parent_id, pdf_url, text, rank = r
             chunk = {
                 "chunk_id": cid,
                 "paper_id": pid,
@@ -280,7 +301,7 @@ def search_fts(query_text, num_results=30, paper_id=None, published_after=None, 
                 "chunk_index": c_idx,
                 "word_count": words,
                 "parent_id": parent_id,
-                "parent_text": parent_text,
+                # parent_text is no longer stored inline — resolved at query time via get_parent_registry()
                 "pdf_url": pdf_url,
                 "text": text
             }
@@ -679,7 +700,7 @@ def query_rag(collection, query_text, num_results=3, paper_id=None, published_af
                 "chunk_index": int(chunk.get("chunk_index", 0)),
                 "word_count": int(chunk.get("word_count", 0)),
                 "parent_id": chunk.get("parent_id", ""),
-                "parent_text": chunk.get("parent_text", "")
+                # parent_text removed — resolved at query time via get_parent_registry()
             }
             chunk_lookup[cid] = {
                 "text": chunk["text"],
@@ -740,27 +761,36 @@ def query_rag(collection, query_text, num_results=3, paper_id=None, published_af
     reranked_passages = reranker.rerank(query_text, passages)
     
     # --- PARENT CONTEXT RETRIEVAL & DE-DUPLICATION ---
-    # We iterate through the sorted reranked child chunks and resolve unique parent contexts
-    # until we collect up to num_results unique parent contexts.
+    # Look up parent text from the registry (paper_parents.json) keyed by parent_id.
+    # This avoids embedding the full parent text in every child's metadata.
+    parent_registry = get_parent_registry()
+
     unique_parents = []
     seen_parent_ids = set()
     for p in reranked_passages:
         pid = p["metadata"].get("parent_id")
-        p_text = p["metadata"].get("parent_text")
-        
+
+        # Resolve parent text: first try registry, fall back to legacy inline field (old DB rows)
+        parent_entry = parent_registry.get(pid) if pid else None
+        p_text = (
+            parent_entry["text"]
+            if parent_entry
+            else p["metadata"].get("parent_text")  # legacy fallback for old Chroma rows
+        )
+
         if pid and p_text:
             # Parent-child chunk found
             if pid not in seen_parent_ids:
                 seen_parent_ids.add(pid)
                 unique_parents.append({
                     "chunk_id": p["id"],
-                    "text": p_text,  # Return parent text as context
+                    "text": p_text,  # Full parent text resolved from registry
                     "metadata": p["metadata"],
                     "score": p.get("score", 0.0),
                     "rrf_score": p.get("rrf_score", 0.0)
                 })
         else:
-            # Fallback if no parent context is present
+            # Fallback: no parent context — use the child chunk text directly
             cid = p["id"]
             if cid not in seen_parent_ids:
                 seen_parent_ids.add(cid)
@@ -771,7 +801,7 @@ def query_rag(collection, query_text, num_results=3, paper_id=None, published_af
                     "score": p.get("score", 0.0),
                     "rrf_score": p.get("rrf_score", 0.0)
                 })
-                
+
         if len(unique_parents) == num_results:
             break
             
