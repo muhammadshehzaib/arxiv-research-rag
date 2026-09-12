@@ -48,11 +48,28 @@ def init_fts_db(db_path=FTS_DB_PATH, rebuild=False):
         chunk_index INTEGER,
         word_count INTEGER,
         parent_id TEXT,
-        parent_text TEXT,
         pdf_url TEXT,
         text TEXT
     );
     """)
+    
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS parents (
+        parent_id TEXT PRIMARY KEY,
+        paper_id TEXT,
+        title TEXT,
+        authors TEXT,
+        published TEXT,
+        published_int INTEGER,
+        total_pages INTEGER,
+        pdf_url TEXT,
+        word_count INTEGER,
+        text TEXT
+    );
+    """)
+
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_parents_paper_id ON parents(paper_id);")
+
     
     # Index important metadata columns for instant SQL filtering
     cur.execute("CREATE INDEX IF NOT EXISTS idx_chunks_paper_id ON chunks(paper_id);")
@@ -94,16 +111,15 @@ def init_fts_db(db_path=FTS_DB_PATH, rebuild=False):
 
 def build_parent_lookup(parents_path=PARENTS_JSON_PATH):
     """
-    Loads paper_parents.json and returns a dict: parent_id -> parent_text.
-    Returns an empty dict if the file is missing (backward compatible).
+    Loads paper_parents.json and returns the raw dict:
+        { parent_id: { "text": "...", "title": "...", "authors": [...], ... }, ... }
+    Returns {} if the file is missing.
     """
     if not os.path.exists(parents_path):
-        print(f"⚠️ Parents file not found at {parents_path}. parent_text will be empty.")
+        print(f"⚠️ Parents file not found at {parents_path}. Parent data will be empty.")
         return {}
     with open(parents_path, "r", encoding="utf-8") as f:
-        parents = json.load(f)
-    # parents is {parent_id: {..., "text": "..."}}
-    return {pid: p.get("text", "") for pid, p in parents.items()}
+        return json.load(f)
 
 def build_index(chunks_path=CHUNKS_JSON_PATH, db_path=FTS_DB_PATH, rebuild=False):
     """
@@ -149,8 +165,8 @@ def build_index(chunks_path=CHUNKS_JSON_PATH, db_path=FTS_DB_PATH, rebuild=False
     insert_sql = """
     INSERT OR IGNORE INTO chunks (
         chunk_id, paper_id, title, authors, published, published_int,
-        total_pages, chunk_index, word_count, parent_id, parent_text, pdf_url, text
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        total_pages, chunk_index, word_count, parent_id, pdf_url, text
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """
     
     insert_start = time.time()
@@ -173,7 +189,6 @@ def build_index(chunks_path=CHUNKS_JSON_PATH, db_path=FTS_DB_PATH, rebuild=False
                 int(c.get("chunk_index", 0)),
                 int(c.get("word_count", 0)),
                 c.get("parent_id", ""),
-                parent_lookup.get(c.get("parent_id", ""), ""),
                 c.get("pdf_url", ""),
                 c.get("text", "")
             ))
@@ -182,7 +197,34 @@ def build_index(chunks_path=CHUNKS_JSON_PATH, db_path=FTS_DB_PATH, rebuild=False
         con.commit()
         done = min(i + batch_size, total_to_insert)
         print(f"   Indexed [{done}/{total_to_insert}] chunks ({done / total_to_insert * 100:.1f}%)...")
-        
+
+    print(f"📥 Inserting {len(parent_lookup)} parents into SQLite...")
+    parent_insert_sql = """
+    INSERT OR IGNORE INTO parents (
+        parent_id, paper_id, title, authors, published, published_int,
+        total_pages, pdf_url, word_count, text
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """
+    parent_rows = []
+    for pid, p in parent_lookup.items():
+        authors_str = ", ".join(p["authors"]) if isinstance(p.get("authors"), list) else str(p.get("authors", ""))
+        parent_rows.append((
+            pid,
+            p.get("paper_id", ""),
+            p.get("title", ""),
+            authors_str,
+            p.get("published", ""),
+            p.get("published_int", 0),
+            int(p.get("total_pages", 0)),
+            p.get("pdf_url", ""),
+            int(p.get("word_count", 0)),
+            p.get("text", ""),
+        ))
+    cur.executemany(parent_insert_sql, parent_rows)
+    con.commit()
+    print(f"   ✅ Inserted {len(parent_rows)} parents.")
+    # ⬆️ END PARENTS BLOCK ⬆️
+
     # Optimize FTS index structure
     print("⚡ Optimizing FTS5 inverted index (merging b-tree segments)...")
     cur.execute("INSERT INTO chunks_fts(chunks_fts) VALUES('optimize');")
