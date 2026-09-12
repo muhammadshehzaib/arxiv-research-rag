@@ -217,9 +217,21 @@ def main():
     active_paper_ids = {p.get('paperId') or p.get('paper_id') for p in active_metadata}
 
     # Initialize all_chunks with chunks of papers that are still active
+       # Initialize all_chunks with chunks of papers that are still active
     all_chunks = [c for c in existing_chunks if c.get("paper_id") in active_paper_ids]
     already_saved_ids = {c.get("paper_id") for c in all_chunks}
-    
+
+    # NEW: Load existing parent registry if it exists
+    parents_path = os.path.join(data_dir, "paper_parents.json")
+    all_parents = {}
+    if os.path.exists(parents_path):
+        try:
+            with open(parents_path, "r", encoding="utf-8") as f:
+                all_parents = json.load(f)
+            print(f"📦 Loaded {len(all_parents)} existing parent chunks from cache.")
+        except Exception as e:
+            print(f"⚠️ Error reading existing parents: {e}")
+
     processed_count = 0
 
     for paper in active_metadata:
@@ -275,15 +287,31 @@ def main():
         for p in parent_chunks:
             p_text = p["text"]
             p_idx = p["chunk_index"]
-            
+            parent_id = f"{paper_id}_p{p_idx}"
+
+            # NEW: Store parent text ONCE in the registry
+            all_parents[parent_id] = {
+                "parent_id": parent_id,
+                "paper_id": paper_id,
+                "parent_index": p_idx,
+                "text": p_text,
+                "word_count": p["word_count"],
+                "title": paper['title'],
+                "authors": paper['authors'],
+                "published": paper['published'],
+                "published_int": date_to_int(paper.get('published', '')),
+                "pdf_url": pdf_url,
+                "total_pages": total_pages,
+            }
+
             # Sub-chunk the parent chunk's text into child chunks
             child_chunks = chunk_text(p_text, CHILD_CHUNK_SIZE, CHILD_OVERLAP)
-            
+
             for c in child_chunks:
                 enriched = {
                     "chunk_id": f"{paper_id}_c{child_global_index}",
-                    "parent_id": f"{paper_id}_p{p_idx}",
-                    "parent_text": p_text,
+                    "parent_id": parent_id,          # <-- Just the reference
+                    # NO parent_text here anymore!
                     "parent_index": p_idx,
                     "paper_id": paper_id,
                     "title": paper['title'],

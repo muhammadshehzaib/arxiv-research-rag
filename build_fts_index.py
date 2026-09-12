@@ -9,6 +9,9 @@ setup_windows_encoding()
 
 FTS_DB_PATH = os.path.join("data", "bm25_fts.db")
 CHUNKS_JSON_PATH = os.path.join("data", "paper_chunks.json")
+PARENTS_JSON_PATH = os.path.join("data", "paper_parents.json")
+
+
 
 def init_fts_db(db_path=FTS_DB_PATH, rebuild=False):
     """
@@ -88,6 +91,20 @@ def init_fts_db(db_path=FTS_DB_PATH, rebuild=False):
     con.commit()
     return con
 
+
+def build_parent_lookup(parents_path=PARENTS_JSON_PATH):
+    """
+    Loads paper_parents.json and returns a dict: parent_id -> parent_text.
+    Returns an empty dict if the file is missing (backward compatible).
+    """
+    if not os.path.exists(parents_path):
+        print(f"⚠️ Parents file not found at {parents_path}. parent_text will be empty.")
+        return {}
+    with open(parents_path, "r", encoding="utf-8") as f:
+        parents = json.load(f)
+    # parents is {parent_id: {..., "text": "..."}}
+    return {pid: p.get("text", "") for pid, p in parents.items()}
+
 def build_index(chunks_path=CHUNKS_JSON_PATH, db_path=FTS_DB_PATH, rebuild=False):
     """
     Reads paper chunks and populates the SQLite FTS5 database in bulk.
@@ -112,6 +129,10 @@ def build_index(chunks_path=CHUNKS_JSON_PATH, db_path=FTS_DB_PATH, rebuild=False
     with open(chunks_path, "r", encoding="utf-8") as f:
         chunks = json.load(f)
     print(f"✅ Loaded {len(chunks)} chunks into memory in {time.time() - load_start:.2f}s.")
+
+    print(f"📖 Loading parent registry from {PARENTS_JSON_PATH}...")
+    parent_lookup = build_parent_lookup(PARENTS_JSON_PATH)
+    print(f"✅ Loaded {len(parent_lookup):,} parent entries.")
     
     # Filter for new chunks if not rebuilding
     if not rebuild and existing_count > 0:
@@ -152,7 +173,7 @@ def build_index(chunks_path=CHUNKS_JSON_PATH, db_path=FTS_DB_PATH, rebuild=False
                 int(c.get("chunk_index", 0)),
                 int(c.get("word_count", 0)),
                 c.get("parent_id", ""),
-                c.get("parent_text", ""),
+                parent_lookup.get(c.get("parent_id", ""), ""),
                 c.get("pdf_url", ""),
                 c.get("text", "")
             ))

@@ -9,7 +9,7 @@ from typing import Optional
 
 # Import RAG pipeline from query_rag
 from query_rag import init_services, query_rag
-
+from utils import to_jsonable
 app = FastAPI(title="arXiv Research RAG Web UI")
 
 # CORS Setup to allow connections from any client
@@ -89,7 +89,7 @@ def get_stats():
         except Exception:
             pass
             
-    return {"papers": paper_count, "chunks": chunk_count}
+    return to_jsonable({"papers": paper_count, "chunks": chunk_count})
 
 @app.post("/api/query")
 def post_query(req: QueryRequest):
@@ -113,7 +113,7 @@ def post_query(req: QueryRequest):
             bm25_chunks=bm25_chunks,
             chat_history=req.chat_history
         )
-        return {"answer": answer, "sources": sources}
+        return to_jsonable({"answer": answer, "sources": sources})
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -124,7 +124,7 @@ def get_eval_latest():
         return {"status": "no_runs_yet", "message": "No evaluation has been run yet."}
     try:
         with open(results_path, "r", encoding="utf-8") as f:
-            return json.load(f)
+            return to_jsonable(json.load(f))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -135,7 +135,7 @@ def get_eval_history():
         return []
     try:
         with open(history_path, "r", encoding="utf-8") as f:
-            return json.load(f)
+            return to_jsonable(json.load(f))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -146,7 +146,7 @@ def post_eval_run():
         results = run_evaluation()
         if results is None:
             raise HTTPException(status_code=500, detail="Evaluation failed to run. Check server logs.")
-        return results
+        return to_jsonable(results)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

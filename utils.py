@@ -2,6 +2,8 @@ import os
 import sys
 import re
 import json
+import numpy as np
+
 
 def setup_windows_encoding():
     """
@@ -80,3 +82,20 @@ def save_json(filepath, data, indent=2):
     os.makedirs(os.path.dirname(filepath), exist_ok=True)
     with open(filepath, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=indent, ensure_ascii=False)
+
+def to_jsonable(obj):
+    """
+    Recursively convert numpy scalars/arrays to native Python types
+    so FastAPI's jsonable_encoder can serialize them.
+    """
+    if isinstance(obj, dict):
+        return {k: to_jsonable(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [to_jsonable(v) for v in obj]
+    if isinstance(obj, np.integer):
+        return int(obj)
+    if isinstance(obj, np.floating):
+        return float(obj)
+    if isinstance(obj, np.ndarray):
+        return obj.tolist()
+    return obj
