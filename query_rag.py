@@ -468,7 +468,62 @@ Standalone Search Query:"""
         
     return query_text
 
-def query_rag(collection, query_text, num_results=3, paper_id=None, published_after=None, min_pages=None, bm25=None, bm25_chunks=None, chat_history=None):
+def fallback_to_live_mcp(query_text, original_user_query, num_results, chat_history, start_time, reason="Insufficient Evidence"):
+    """
+    Connects to the Academic MCP Server to retrieve live research papers from arXiv / Semantic Scholar
+    when the local Chroma DB vector store lacks matching documents or sufficient confidence.
+    """
+    try:
+        from mcp_client import get_mcp_client
+        print(f"\n🌐 [MCP LIVE FALLBACK ACTIVATED] ({reason})")
+        print(f"   Local database has insufficient context. Querying Academic MCP Server for live papers...")
+        
+        client = get_mcp_client()
+        live_papers = client.fetch_live_papers(query_text, max_results=num_results)
+        
+        if not live_papers:
+            print("   ⚠️ MCP Server found no live papers for this query.")
+            return None, None
+            
+        print(f"   ✅ MCP Server retrieved {len(live_papers)} live research paper(s). Generating grounded answer...")
+        context_blocks, sources = client.format_live_context(live_papers)
+        context = "\n---\n".join(context_blocks)
+        
+        history_context = ""
+        if chat_history and len(chat_history) > 0:
+            formatted_turns = []
+            for msg in chat_history[-4:]:
+                role = "User" if msg.get("role") in ["user", "human"] else "Assistant"
+                formatted_turns.append(f"{role}: {msg.get('content', '')}")
+            history_context = "Conversation History:\n" + "\n".join(formatted_turns) + "\n\n"
+
+        prompt = f"""You are a helpful and precise research assistant specializing in scientific literature.
+Answer the user's question using ONLY the provided live research papers retrieved from arXiv / Academic Graph via Model Context Protocol (MCP).
+
+Requirements:
+1. Ground your answer strictly on the provided Context.
+2. Note that these are live papers retrieved via MCP because the local database lacked sufficient coverage.
+3. Be professional, detailed, and structure your answer logically.
+4. Cite your sources in the text using [Source 1], [Source 2], etc.
+
+{history_context}Context (Live Academic MCP):
+{context}
+
+Question: {original_user_query}
+
+Answer:"""
+
+        model = genai.GenerativeModel(model_name=LLM_MODEL)
+        response = model.generate_content(prompt)
+        generated_answer = response.text
+        elapsed_ms = (time.time() - start_time) * 1000
+        print(f"⏱️ Full Pipeline Latency: {elapsed_ms:.1f}ms (Live MCP Answer Generated & Grounded)")
+        return generated_answer, sources
+    except Exception as e:
+        print(f"⚠️ Failed during live MCP fallback: {e}")
+        return None, None
+
+def query_rag(collection, query_text, num_results=3, paper_id=None, published_after=None, min_pages=None, bm25=None, bm25_chunks=None, chat_history=None, enable_mcp_fallback=True):
     # 1. Start timer immediately at the entry point for 100% honest latency accounting
     start_time = time.time()
     original_user_query = query_text
@@ -712,6 +767,10 @@ def query_rag(collection, query_text, num_results=3, paper_id=None, published_af
             
     # Calculate RRF scores
     if not all_candidate_ids:
+        if enable_mcp_fallback:
+            mcp_ans, mcp_sources = fallback_to_live_mcp(query_text, original_user_query, num_results, chat_history, start_time, reason="No Matching Local Documents")
+            if mcp_ans is not None:
+                return mcp_ans, mcp_sources
         corpus_size = get_corpus_size()
         refusal_msg = (
             "🛡️ [REFUSAL LADDER ACTIVATED - Rung 1: No Matching Documents]\n\n"
@@ -811,6 +870,10 @@ def query_rag(collection, query_text, num_results=3, paper_id=None, published_af
     print(f"ℹ️ Reranking finished. Selected {len(unique_parents)} unique parent contexts from {len(reranked_passages)} reranked candidates.")
     
     if not unique_parents:
+        if enable_mcp_fallback:
+            mcp_ans, mcp_sources = fallback_to_live_mcp(query_text, original_user_query, num_results, chat_history, start_time, reason="Zero Local Contexts Extracted")
+            if mcp_ans is not None:
+                return mcp_ans, mcp_sources
         corpus_size = get_corpus_size()
         refusal_msg = (
             "🛡️ [REFUSAL LADDER ACTIVATED - Rung 1: Zero Contexts Selected]\n\n"
@@ -865,6 +928,11 @@ def query_rag(collection, query_text, num_results=3, paper_id=None, published_af
     top_raw_score = sources[0]["rerank_score"]
     
     if top_confidence < REFUSAL_CONFIDENCE_THRESHOLD:
+        if enable_mcp_fallback:
+            mcp_ans, mcp_sources = fallback_to_live_mcp(query_text, original_user_query, num_results, chat_history, start_time, reason=f"Low Local Confidence ({top_confidence*100:.1f}% < {REFUSAL_CONFIDENCE_THRESHOLD*100:.0f}%)")
+            if mcp_ans is not None:
+                return mcp_ans, mcp_sources
+
         elapsed_ms = (time.time() - start_time) * 1000
         top_title = sources[0]["title"]
         
@@ -959,7 +1027,7 @@ def print_result(query_text, answer, sources):
         print(f"      Distance Score: {src['distance']:.4f}")
     print("="*80 + "\n")
 
-def interactive_chat(collection, paper_id=None, published_after=None, min_pages=None):
+def interactive_chat(collection, paper_id=None, published_after=None, min_pages=None, enable_mcp_fallback=True):
     print("\n✨ Entered Interactive RAG Chat Mode! Type 'exit' or 'quit' to close.")
     active_filters = []
     if paper_id:
@@ -970,6 +1038,7 @@ def interactive_chat(collection, paper_id=None, published_after=None, min_pages=
         active_filters.append(f"Min Pages: {min_pages}")
     if active_filters:
         print(f"⚙️ Active Filters: {', '.join(active_filters)}")
+    print(f"🌐 Live MCP Fallback: {'Enabled' if enable_mcp_fallback else 'Disabled'}")
     print("Ask any question based on your downloaded arXiv papers.\n")
     
     chat_history = []
@@ -989,7 +1058,8 @@ def interactive_chat(collection, paper_id=None, published_after=None, min_pages=
                 paper_id=paper_id, 
                 published_after=published_after, 
                 min_pages=min_pages,
-                chat_history=chat_history
+                chat_history=chat_history,
+                enable_mcp_fallback=enable_mcp_fallback
             )
             print_result(query_text, answer, sources)
             
@@ -1010,10 +1080,12 @@ if __name__ == "__main__":
     parser.add_argument("--paper-id", type=str, default=None, help="Filter results by a specific arXiv Paper ID.")
     parser.add_argument("--published-after", type=str, default=None, help="Filter results by publication date (YYYY-MM-DD or newer).")
     parser.add_argument("--min-pages", type=int, default=None, help="Filter results by minimum page count.")
+    parser.add_argument("--no-mcp-fallback", action="store_true", help="Disable live MCP fallback for missing or low-confidence papers.")
     args = parser.parse_args()
     
     try:
         collection = init_services()
+        enable_mcp = not args.no_mcp_fallback
         
         if args.query:
             print(f"🔍 Processing query: '{args.query}'...")
@@ -1023,7 +1095,8 @@ if __name__ == "__main__":
                 num_results=args.results,
                 paper_id=args.paper_id,
                 published_after=args.published_after,
-                min_pages=args.min_pages
+                min_pages=args.min_pages,
+                enable_mcp_fallback=enable_mcp
             )
             print_result(args.query, answer, sources)
         else:
@@ -1031,7 +1104,8 @@ if __name__ == "__main__":
                 collection,
                 paper_id=args.paper_id,
                 published_after=args.published_after,
-                min_pages=args.min_pages
+                min_pages=args.min_pages,
+                enable_mcp_fallback=enable_mcp
             )
             
     except Exception as e:

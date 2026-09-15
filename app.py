@@ -52,6 +52,7 @@ class QueryRequest(BaseModel):
     min_pages: Optional[int] = None
     num_results: Optional[int] = 3
     chat_history: Optional[list] = None
+    enable_mcp_fallback: Optional[bool] = True
 
 @app.get("/api/papers")
 def get_papers():
@@ -101,7 +102,7 @@ def post_query(req: QueryRequest):
             raise HTTPException(status_code=500, detail=f"RAG services not initialized: {e}")
             
     try:
-        # Run query through RAG pipeline with optional filters and BM25 cache
+        # Run query through RAG pipeline with optional filters, BM25 cache, and MCP fallback
         answer, sources = query_rag(
             collection,
             req.query,
@@ -111,7 +112,8 @@ def post_query(req: QueryRequest):
             min_pages=req.min_pages,
             bm25=bm25,
             bm25_chunks=bm25_chunks,
-            chat_history=req.chat_history
+            chat_history=req.chat_history,
+            enable_mcp_fallback=req.enable_mcp_fallback if req.enable_mcp_fallback is not None else True
         )
         return to_jsonable({"answer": answer, "sources": sources})
     except Exception as e:

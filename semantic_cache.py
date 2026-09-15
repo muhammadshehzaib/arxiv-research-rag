@@ -7,6 +7,8 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+from utils import to_jsonable
+
 CACHE_FILE_PATH = os.path.join("data", "semantic_cache.json")
 DEFAULT_SIMILARITY_THRESHOLD = float(os.getenv("SEMANTIC_CACHE_THRESHOLD", "0.92"))
 EMBEDDING_PROVIDER = os.getenv("EMBEDDING_PROVIDER", "gemini")
@@ -103,11 +105,12 @@ class SemanticCache:
         try:
             serializable = []
             for item in self.entries:
+                emb = item["embedding"].tolist() if hasattr(item["embedding"], "tolist") else list(item["embedding"])
                 serializable.append({
                     "query_text": item["query_text"],
-                    "embedding": item["embedding"].tolist(),
+                    "embedding": emb,
                     "answer": item["answer"],
-                    "sources": item["sources"],
+                    "sources": to_jsonable(item["sources"]),
                     "filters": item.get("filters", {}),
                     "created_at": item.get("created_at", ""),
                     "hit_count": item.get("hit_count", 0)

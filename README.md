@@ -83,6 +83,13 @@ The Python implementation uses the `arxiv` client library, `pypdf` for text extr
 
 ---
 
+### 3. Model Context Protocol (MCP) Integration
+This repository includes a native **Model Context Protocol (MCP)** implementation:
+* **Academic MCP Server (`academic_mcp_server.py`)**: Exposes tools (`search_arxiv`, `search_semantic_scholar`, `fetch_paper_by_id`, `search_local_rag`, `ingest_live_paper_to_rag`) over stdio for external AI IDEs (Antigravity, Claude Desktop, Cursor).
+* **Live Paper MCP Fallback (`mcp_client.py`)**: Automatically connects to the MCP server whenever local vector retrieval produces insufficient evidence (< 70% confidence) or 0 matching candidates, fetching live papers and generating grounded answers.
+
+---
+
 ## Workflow Details
 
 1. **Download Phase**: The downloaders query the arXiv API, fetch matching papers, save their metadata to `data/papers_metadata.json`, and download the PDFs to `data/papers/`.
@@ -91,6 +98,7 @@ The Python implementation uses the `arxiv` client library, `pypdf` for text extr
 ---
 
 ## Change Log & Execution History
+- [2026-09-16] Integrated Model Context Protocol (MCP) Server & Client to dynamically retrieve live papers from arXiv and Semantic Scholar whenever local Chroma DB retrieval falls below the confidence threshold.
 - [2026-09-10] Replaced in-memory rank_bm25 linear scan with an on-disk SQLite FTS5 inverted index (data/bm25_fts.db) for sub-5ms BM25 retrieval, instant CLI startup, and ~20MB RAM usage across 224,735 chunks.
 - [2026-09-08] Eliminated redundant duplicate embedding API calls per query by computing query_vector once upfront and reusing it across semantic cache lookup, Chroma DB dense retrieval, and semantic cache store.
 - [2026-09-07] Refactored duplicate utility functions into centralized utils.py module (date_to_int, clean_text, tokenize_text, setup_windows_encoding) adhering to the DRY principle.
