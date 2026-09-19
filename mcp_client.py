@@ -161,3 +161,25 @@ def get_mcp_client() -> AcademicMCPClient:
     if _mcp_client_instance is None:
         _mcp_client_instance = AcademicMCPClient()
     return _mcp_client_instance
+
+def trigger_background_ingest(paper_id: str):
+    """
+    Spawns an asynchronous background worker thread to download, chunk,
+    and index the live arXiv paper into Chroma DB and SQLite FTS5 index.
+    """
+    import threading
+    client = get_mcp_client()
+
+    def _worker():
+        try:
+            print(f"\n📥 [AUTO-INGEST WORKER] Downloading and indexing '{paper_id}' into Chroma DB...")
+            res = client.call_tool("ingest_live_paper_to_rag", {"paper_id": paper_id})
+            if res.get("status") == "success":
+                print(f"✨ [AUTO-INGEST WORKER] Paper '{paper_id}' is now permanently indexed in Chroma DB!")
+            else:
+                print(f"ℹ️ [AUTO-INGEST WORKER] Ingest status for '{paper_id}': {res.get('message', res.get('status'))}")
+        except Exception as err:
+            print(f"⚠️ [AUTO-INGEST WORKER] Background ingest failed for '{paper_id}': {err}")
+
+    thread = threading.Thread(target=_worker, daemon=True)
+    thread.start()

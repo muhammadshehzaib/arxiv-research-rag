@@ -518,6 +518,17 @@ Answer:"""
         generated_answer = response.text
         elapsed_ms = (time.time() - start_time) * 1000
         print(f"⏱️ Full Pipeline Latency: {elapsed_ms:.1f}ms (Live MCP Answer Generated & Grounded)")
+
+        # Trigger background auto-ingest into Chroma DB & FTS5 for all fetched live papers
+        try:
+            from mcp_client import trigger_background_ingest
+            for p in live_papers:
+                pid = p.get("paper_id")
+                if pid:
+                    trigger_background_ingest(pid)
+        except Exception as ingest_err:
+            print(f"⚠️ Warning: Auto-ingest trigger error: {ingest_err}")
+
         return generated_answer, sources
     except Exception as e:
         print(f"⚠️ Failed during live MCP fallback: {e}")
