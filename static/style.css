@@ -385,6 +385,13 @@ input[type="range"] {
     box-shadow: var(--shadow-premium);
 }
 
+.loading-status {
+    margin: 12px 0 0;
+    color: var(--text-muted);
+    font-size: 13px;
+    line-height: 1.5;
+}
+
 /* Citations inside answer */
 .citation-link {
     background: rgba(129, 140, 248, 0.15);

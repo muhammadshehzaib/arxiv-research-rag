@@ -99,6 +99,8 @@ This repository includes a native **Model Context Protocol (MCP)** implementatio
 
 ## Change Log & Execution History
 
+- [2026-10-10] Added live, plain-language search progress in the chat UI, with backend status events that distinguish saved-paper search from live website search.
+
 - [2026-10-10] Added fast conversational routing, research-only live fallback, a health endpoint, bounded web queries and external calls, and per-stage RAG timing logs.
 - [2026-09-16] Implemented background Auto-Ingestion for live arXiv papers retrieved via MCP fallback, automatically saving full PDFs, embeddings, and FTS5 indices into Chroma DB.
 - [2026-09-16] Integrated Model Context Protocol (MCP) Server & Client to dynamically retrieve live papers from arXiv and Semantic Scholar whenever local Chroma DB retrieval falls below the confidence threshold.

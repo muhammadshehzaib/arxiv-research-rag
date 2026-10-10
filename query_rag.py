@@ -476,7 +476,7 @@ Standalone Search Query:"""
         
     return query_text
 
-def fallback_to_live_mcp(query_text, original_user_query, num_results, chat_history, start_time, reason="Insufficient Evidence"):
+def fallback_to_live_mcp(query_text, original_user_query, num_results, chat_history, start_time, reason="Insufficient Evidence", progress=None):
     """
     Connects to the Academic MCP Server to retrieve live research papers from arXiv / Semantic Scholar
     when the local Chroma DB vector store lacks matching documents or sufficient confidence.
@@ -485,6 +485,8 @@ def fallback_to_live_mcp(query_text, original_user_query, num_results, chat_hist
         from mcp_client import get_mcp_client
         print(f"\n🌐 [MCP LIVE FALLBACK ACTIVATED] ({reason})")
         print(f"   Local database has insufficient context. Querying Academic MCP Server for live papers...")
+        if progress:
+            progress("live_search")
         
         client = get_mcp_client()
         with timed_stage("live_search"):
@@ -498,6 +500,8 @@ def fallback_to_live_mcp(query_text, original_user_query, num_results, chat_hist
             return None, None
             
         print(f"   ✅ MCP Server retrieved {len(live_papers)} live research paper(s). Generating grounded answer...")
+        if progress:
+            progress("writing_live_answer")
         context_blocks, sources = client.format_live_context(live_papers)
         context = "\n---\n".join(context_blocks)
         
@@ -553,7 +557,7 @@ Answer:"""
         print(f"⚠️ Failed during live MCP fallback: {e}")
         return None, None
 
-def query_rag(collection, query_text, num_results=3, paper_id=None, published_after=None, min_pages=None, bm25=None, bm25_chunks=None, chat_history=None, enable_mcp_fallback=True, deadline=None):
+def query_rag(collection, query_text, num_results=3, paper_id=None, published_after=None, min_pages=None, bm25=None, bm25_chunks=None, chat_history=None, enable_mcp_fallback=True, deadline=None, progress=None):
     # 1. Start timer immediately at the entry point for 100% honest latency accounting
     start_time = time.time()
     set_deadline(deadline if deadline is not None else time.monotonic() + QUERY_TIMEOUT_SECONDS)
@@ -817,7 +821,7 @@ def query_rag(collection, query_text, num_results=3, paper_id=None, published_af
     # Calculate RRF scores
     if not all_candidate_ids:
         if live_fallback_allowed:
-            mcp_ans, mcp_sources = fallback_to_live_mcp(query_text, original_user_query, num_results, chat_history, start_time, reason="No Matching Local Documents")
+            mcp_ans, mcp_sources = fallback_to_live_mcp(query_text, original_user_query, num_results, chat_history, start_time, reason="No Matching Local Documents", progress=progress)
             if mcp_ans is not None:
                 return mcp_ans, mcp_sources
         corpus_size = get_corpus_size()
@@ -922,7 +926,7 @@ def query_rag(collection, query_text, num_results=3, paper_id=None, published_af
     
     if not unique_parents:
         if live_fallback_allowed:
-            mcp_ans, mcp_sources = fallback_to_live_mcp(query_text, original_user_query, num_results, chat_history, start_time, reason="Zero Local Contexts Extracted")
+            mcp_ans, mcp_sources = fallback_to_live_mcp(query_text, original_user_query, num_results, chat_history, start_time, reason="Zero Local Contexts Extracted", progress=progress)
             if mcp_ans is not None:
                 return mcp_ans, mcp_sources
         corpus_size = get_corpus_size()
@@ -980,7 +984,7 @@ def query_rag(collection, query_text, num_results=3, paper_id=None, published_af
     
     if top_confidence < REFUSAL_CONFIDENCE_THRESHOLD:
         if live_fallback_allowed:
-            mcp_ans, mcp_sources = fallback_to_live_mcp(query_text, original_user_query, num_results, chat_history, start_time, reason=f"Low Local Confidence ({top_confidence*100:.1f}% < {REFUSAL_CONFIDENCE_THRESHOLD*100:.0f}%)")
+            mcp_ans, mcp_sources = fallback_to_live_mcp(query_text, original_user_query, num_results, chat_history, start_time, reason=f"Low Local Confidence ({top_confidence*100:.1f}% < {REFUSAL_CONFIDENCE_THRESHOLD*100:.0f}%)", progress=progress)
             if mcp_ans is not None:
                 return mcp_ans, mcp_sources
 
@@ -1051,6 +1055,8 @@ Answer:"""
 
     # Generate Answer via Gemini
     try:
+        if progress:
+            progress("writing_local_answer")
         model = genai.GenerativeModel(model_name=LLM_MODEL)
         with timed_stage("gemini_local_answer"):
             response = model.generate_content(

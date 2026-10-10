@@ -1,9 +1,9 @@
-import { fetchPapers, fetchStats, queryRAG } from "./services/api.js";
+import { fetchPapers, fetchStats, queryRAG } from "./services/api.js?v=20261010-progress";
 import { showToast } from "./utils/helpers.js";
 
 // Import Web Components to register them
 import "./components/RagSidebar.js";
-import "./components/RagChat.js";
+import "./components/RagChat.js?v=20261010-progress";
 import "./components/RagSources.js";
 import "./components/RagEvaluation.js";
 
@@ -60,6 +60,19 @@ document.addEventListener("DOMContentLoaded", () => {
         // 1. Append User Bubble & AI Loading Bubble
         chat.appendMessage(queryText, "user");
         const loadingId = chat.appendLoadingBubble();
+        let currentStage = "local_search";
+        const slowSearchTimer = setTimeout(() => {
+            if (currentStage === "local_search") {
+                chat.updateLoadingStatus(loadingId, "Still checking saved research papers. This is taking a little longer than usual...");
+            }
+        }, 4000);
+
+        const progressMessages = {
+            local_search: "Checking saved research papers...",
+            live_search: "Checking live research websites for relevant papers. This can take a little longer...",
+            writing_local_answer: "Found relevant saved papers. Putting together an answer with sources...",
+            writing_live_answer: "Found papers online. Putting together an answer with sources..."
+        };
 
         try {
             // 2. Fetch Query Answer from RAG system
@@ -68,6 +81,9 @@ document.addEventListener("DOMContentLoaded", () => {
                 paper_id: activeFilters.paperId,
                 published_after: activeFilters.publishedAfter,
                 min_pages: activeFilters.minPages
+            }, (stage) => {
+                currentStage = stage;
+                if (progressMessages[stage]) chat.updateLoadingStatus(loadingId, progressMessages[stage]);
             });
 
             // 3. Remove Loading Bubble
@@ -83,6 +99,8 @@ document.addEventListener("DOMContentLoaded", () => {
             chat.removeBubble(loadingId);
             chat.appendMessage(`❌ **Error querying pipeline**: ${err.message}`, "ai");
             showToast("Failed to run RAG query", "error");
+        } finally {
+            clearTimeout(slowSearchTimer);
         }
     });
 

@@ -6,7 +6,7 @@ from functools import partial
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 from typing import Optional
 
@@ -151,6 +151,85 @@ async def post_query(req: QueryRequest):
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         print(f"[RAG timing] request_total: {(time.monotonic() - request_started) * 1000:.0f} ms", flush=True)
+
+
+@app.post("/api/query/stream")
+async def stream_query(req: QueryRequest):
+    """Send real query stages and the final result as newline-delimited JSON."""
+    async def events():
+        global collection
+
+        def line(payload):
+            return json.dumps(payload, ensure_ascii=False) + "\n"
+
+        reply = quick_reply(req.query)
+        if reply is not None:
+            yield line({"type": "result", "answer": reply, "sources": []})
+            return
+
+        deadline = time.monotonic() + QUERY_TIMEOUT_SECONDS
+        yield line({"type": "status", "stage": "local_search"})
+        if collection is None:
+            try:
+                collection = await asyncio.wait_for(
+                    asyncio.to_thread(init_services), timeout=max(0.1, deadline - time.monotonic())
+                )
+            except asyncio.TimeoutError:
+                yield line({"type": "error", "message": "The research library took too long to start. Please try again."})
+                return
+            except Exception:
+                yield line({"type": "error", "message": "The research library is unavailable. Please try again shortly."})
+                return
+
+        if query_slots.locked():
+            yield line({"type": "error", "message": "The research service is busy. Please try again shortly."})
+            return
+
+        await query_slots.acquire()
+        queue = asyncio.Queue()
+        loop = asyncio.get_running_loop()
+
+        def progress(stage):
+            loop.call_soon_threadsafe(queue.put_nowait, {"type": "status", "stage": stage})
+
+        def finished(future):
+            query_slots.release()
+            try:
+                answer, sources = future.result()
+                queue.put_nowait({"type": "result", "answer": answer, "sources": sources})
+            except Exception:
+                queue.put_nowait({"type": "error", "message": "We couldn't finish that search. Please try again."})
+
+        work = partial(
+            query_rag, collection, req.query,
+            num_results=req.num_results,
+            paper_id=req.paper_id,
+            published_after=req.published_after,
+            min_pages=req.min_pages,
+            bm25=bm25,
+            bm25_chunks=bm25_chunks,
+            chat_history=req.chat_history,
+            enable_mcp_fallback=req.enable_mcp_fallback if req.enable_mcp_fallback is not None else True,
+            deadline=deadline,
+            progress=progress,
+        )
+        future = loop.run_in_executor(None, work)
+        future.add_done_callback(finished)
+
+        while True:
+            try:
+                event = await asyncio.wait_for(queue.get(), timeout=max(0.1, deadline - time.monotonic()))
+            except asyncio.TimeoutError:
+                yield line({"type": "error", "message": "This search is taking too long. Please try a more specific question."})
+                return
+            yield line(event)
+            if event["type"] in ("result", "error"):
+                return
+
+    return StreamingResponse(
+        events(), media_type="application/x-ndjson",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 @app.get("/api/eval/latest")
 def get_eval_latest():

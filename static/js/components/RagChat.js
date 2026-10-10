@@ -165,12 +165,21 @@ class RagChat extends HTMLElement {
                 <div class="skeleton-line medium"></div>
                 <div class="skeleton-line short"></div>
             </div>
+            <p class="loading-status" role="status" aria-live="polite">Checking saved research papers...</p>
         `;
 
         wrapper.appendChild(bubble);
         feed.appendChild(wrapper);
         this.scrollToBottom();
         return bubbleId;
+    }
+
+    updateLoadingStatus(id, message) {
+        const status = this.querySelector(`#${id} .loading-status`);
+        if (status) {
+            status.textContent = message;
+            this.scrollToBottom();
+        }
     }
 
     /**

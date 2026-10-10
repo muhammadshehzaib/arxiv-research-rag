@@ -39,9 +39,9 @@ export async function fetchStats() {
  * @param {Object} queryParams Query payload including query text and filters.
  * @returns {Promise<Object>} Object containing target answer and source citations.
  */
-export async function queryRAG(queryParams) {
+export async function queryRAG(queryParams, onProgress = () => {}) {
     console.log("📡 API: Submitting RAG query:", queryParams);
-    const response = await fetch("/api/query", {
+    const response = await fetch("/api/query/stream", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(queryParams)
@@ -53,9 +53,42 @@ export async function queryRAG(queryParams) {
         throw new Error(errBody.detail || "Server failed to query RAG database");
     }
 
-    const data = await response.json();
-    console.log("✅ API: RAG response received. Sources count:", data.sources ? data.sources.length : 0);
-    return data;
+    if (!response.body) {
+        throw new Error("Your browser cannot show live search progress. Please try an updated browser.");
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+
+    function handleLine(line) {
+        if (!line.trim()) return null;
+        const event = JSON.parse(line);
+        if (event.type === "status") onProgress(event.stage);
+        if (event.type === "error") throw new Error(event.message || "The search could not be completed.");
+        if (event.type === "result") return { answer: event.answer, sources: event.sources || [] };
+        return null;
+    }
+
+    try {
+        while (true) {
+            const { value, done } = await reader.read();
+            buffer += decoder.decode(value || new Uint8Array(), { stream: !done });
+            const lines = buffer.split("\n");
+            buffer = lines.pop();
+            for (const line of lines) {
+                const result = handleLine(line);
+                if (result) return result;
+            }
+            if (done) {
+                const result = handleLine(buffer);
+                if (result) return result;
+                throw new Error("The search ended before an answer was ready. Please try again.");
+            }
+        }
+    } finally {
+        reader.releaseLock();
+    }
 }
 
 /**
