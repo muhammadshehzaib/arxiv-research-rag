@@ -98,6 +98,8 @@ This repository includes a native **Model Context Protocol (MCP)** implementatio
 ---
 
 ## Change Log & Execution History
+
+- [2026-10-10] Added fast conversational routing, research-only live fallback, a health endpoint, bounded web queries and external calls, and per-stage RAG timing logs.
 - [2026-09-16] Implemented background Auto-Ingestion for live arXiv papers retrieved via MCP fallback, automatically saving full PDFs, embeddings, and FTS5 indices into Chroma DB.
 - [2026-09-16] Integrated Model Context Protocol (MCP) Server & Client to dynamically retrieve live papers from arXiv and Semantic Scholar whenever local Chroma DB retrieval falls below the confidence threshold.
 - [2026-09-10] Replaced in-memory rank_bm25 linear scan with an on-disk SQLite FTS5 inverted index (data/bm25_fts.db) for sub-5ms BM25 retrieval, instant CLI startup, and ~20MB RAM usage across 224,735 chunks.

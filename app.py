@@ -1,5 +1,8 @@
 import os
 import json
+import asyncio
+import time
+from functools import partial
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -10,6 +13,7 @@ from typing import Optional
 # Import RAG pipeline from query_rag
 from query_rag import init_services, query_rag
 from utils import to_jsonable
+from query_policy import QUERY_TIMEOUT_SECONDS, quick_reply
 app = FastAPI(title="arXiv Research RAG Web UI")
 
 # CORS Setup to allow connections from any client
@@ -25,6 +29,13 @@ app.add_middleware(
 collection = None
 bm25 = None
 bm25_chunks = None
+query_slots = asyncio.Semaphore(4)
+
+
+@app.get("/api/health")
+def get_health():
+    """Cheap service check; readiness indicates whether RAG initialized at startup."""
+    return {"status": "ok", "rag_ready": collection is not None}
 
 @app.on_event("startup")
 def startup_event():
@@ -93,17 +104,27 @@ def get_stats():
     return to_jsonable({"papers": paper_count, "chunks": chunk_count})
 
 @app.post("/api/query")
-def post_query(req: QueryRequest):
+async def post_query(req: QueryRequest):
     global collection, bm25, bm25_chunks
+    # Short conversational requests do not need an initialized database.
+    reply = quick_reply(req.query)
+    if reply is not None:
+        return {"answer": reply, "sources": []}
+    request_started = time.monotonic()
+    deadline = request_started + QUERY_TIMEOUT_SECONDS
     if collection is None:
         try:
-            collection = init_services()
+            collection = await asyncio.wait_for(asyncio.to_thread(init_services), timeout=max(0.1, deadline - time.monotonic()))
+        except asyncio.TimeoutError:
+            raise HTTPException(status_code=504, detail="RAG initialization took too long. Please try again.")
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"RAG services not initialized: {e}")
-            
+
+    if query_slots.locked():
+        raise HTTPException(status_code=503, detail="Research service is busy. Please try again shortly.")
+    await query_slots.acquire()
     try:
-        # Run query through RAG pipeline with optional filters, BM25 cache, and MCP fallback
-        answer, sources = query_rag(
+        work = partial(query_rag,
             collection,
             req.query,
             num_results=req.num_results,
@@ -113,11 +134,23 @@ def post_query(req: QueryRequest):
             bm25=bm25,
             bm25_chunks=bm25_chunks,
             chat_history=req.chat_history,
-            enable_mcp_fallback=req.enable_mcp_fallback if req.enable_mcp_fallback is not None else True
+            enable_mcp_fallback=req.enable_mcp_fallback if req.enable_mcp_fallback is not None else True,
+            deadline=deadline,
+        )
+        future = asyncio.get_running_loop().run_in_executor(None, work)
+        future.add_done_callback(lambda completed: query_slots.release())
+        answer, sources = await asyncio.wait_for(
+            asyncio.shield(future), timeout=max(0.1, deadline - time.monotonic())
         )
         return to_jsonable({"answer": answer, "sources": sources})
+    except asyncio.TimeoutError:
+        raise HTTPException(status_code=504, detail="Research query took too long. Please try a more specific question.")
     except Exception as e:
+        if isinstance(e, HTTPException):
+            raise
         raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        print(f"[RAG timing] request_total: {(time.monotonic() - request_started) * 1000:.0f} ms", flush=True)
 
 @app.get("/api/eval/latest")
 def get_eval_latest():

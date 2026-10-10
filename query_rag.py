@@ -5,6 +5,7 @@ import argparse
 import sqlite3
 import chromadb
 import google.generativeai as genai
+from google.api_core.exceptions import DeadlineExceeded as GoogleDeadlineExceeded
 from dotenv import load_dotenv
 import re
 import json
@@ -13,6 +14,11 @@ from rank_bm25 import BM25Okapi
 from semantic_cache import get_semantic_cache
 from knowledge_graph import get_knowledge_graph
 from utils import setup_windows_encoding, date_to_int, tokenize_text, get_corpus_size
+from query_policy import (
+    QUERY_TIMEOUT_SECONDS, MCP_SEARCH_TIMEOUT_SECONDS, GEMINI_TIMEOUT_SECONDS,
+    EMBEDDING_TIMEOUT_SECONDS, QueryDeadlineExceeded, allows_live_research,
+    quick_reply, remaining_seconds, set_deadline, timed_stage,
+)
 
 
 REFUSAL_CONFIDENCE_THRESHOLD = float(os.getenv("REFUSAL_THRESHOLD", "0.70"))
@@ -364,7 +370,8 @@ def get_query_embedding(query_text):
         response = genai.embed_content(
             model=EMBEDDING_MODEL,
             content=query_text,
-            task_type="retrieval_query"
+            task_type="retrieval_query",
+            request_options={"timeout": remaining_seconds(EMBEDDING_TIMEOUT_SECONDS)},
         )
         return response['embedding']
     except Exception as e:
@@ -403,7 +410,8 @@ Respond ONLY with a valid JSON object matching the schema below:
         # Force JSON response schema
         response = model.generate_content(
             prompt,
-            generation_config={"response_mime_type": "application/json"}
+            generation_config={"response_mime_type": "application/json"},
+            request_options={"timeout": remaining_seconds(GEMINI_TIMEOUT_SECONDS)},
         )
         data = json.loads(response.text.strip())
         return {
@@ -459,7 +467,7 @@ Standalone Search Query:"""
 
     try:
         model = genai.GenerativeModel(model_name=LLM_MODEL)
-        response = model.generate_content(prompt)
+        response = model.generate_content(prompt, request_options={"timeout": remaining_seconds(GEMINI_TIMEOUT_SECONDS)})
         standalone_query = response.text.strip().strip('"').strip("'")
         if standalone_query and len(standalone_query) > 0:
             return standalone_query
@@ -479,7 +487,11 @@ def fallback_to_live_mcp(query_text, original_user_query, num_results, chat_hist
         print(f"   Local database has insufficient context. Querying Academic MCP Server for live papers...")
         
         client = get_mcp_client()
-        live_papers = client.fetch_live_papers(query_text, max_results=num_results)
+        with timed_stage("live_search"):
+            live_papers = client.fetch_live_papers(
+                query_text, max_results=num_results,
+                timeout=remaining_seconds(MCP_SEARCH_TIMEOUT_SECONDS),
+            )
         
         if not live_papers:
             print("   ⚠️ MCP Server found no live papers for this query.")
@@ -514,7 +526,11 @@ Question: {original_user_query}
 Answer:"""
 
         model = genai.GenerativeModel(model_name=LLM_MODEL)
-        response = model.generate_content(prompt)
+        with timed_stage("gemini_live_answer"):
+            response = model.generate_content(
+                prompt, request_options={"timeout": remaining_seconds(GEMINI_TIMEOUT_SECONDS)}
+            )
+        remaining_seconds()
         generated_answer = response.text
         elapsed_ms = (time.time() - start_time) * 1000
         print(f"⏱️ Full Pipeline Latency: {elapsed_ms:.1f}ms (Live MCP Answer Generated & Grounded)")
@@ -530,14 +546,25 @@ Answer:"""
             print(f"⚠️ Warning: Auto-ingest trigger error: {ingest_err}")
 
         return generated_answer, sources
+    except (TimeoutError, GoogleDeadlineExceeded) as e:
+        print(f"[RAG timeout] Live fallback: {e}", flush=True)
+        return "Live paper search took too long. Please try a more specific research question.", []
     except Exception as e:
         print(f"⚠️ Failed during live MCP fallback: {e}")
         return None, None
 
-def query_rag(collection, query_text, num_results=3, paper_id=None, published_after=None, min_pages=None, bm25=None, bm25_chunks=None, chat_history=None, enable_mcp_fallback=True):
+def query_rag(collection, query_text, num_results=3, paper_id=None, published_after=None, min_pages=None, bm25=None, bm25_chunks=None, chat_history=None, enable_mcp_fallback=True, deadline=None):
     # 1. Start timer immediately at the entry point for 100% honest latency accounting
     start_time = time.time()
+    set_deadline(deadline if deadline is not None else time.monotonic() + QUERY_TIMEOUT_SECONDS)
+    reply = quick_reply(query_text)
+    if reply is not None:
+        print("[RAG timing] quick_reply: 0 ms", flush=True)
+        return reply, []
     original_user_query = query_text
+    live_fallback_allowed = enable_mcp_fallback and allows_live_research(query_text, paper_id=paper_id)
+    if enable_mcp_fallback and not live_fallback_allowed:
+        print("[RAG] Live fallback skipped: query has no research signal", flush=True)
 
     # 2. Check Semantic Cache FIRST before running any expensive LLM calls (e.g. filter extraction)
     manual_filters = {
@@ -551,7 +578,8 @@ def query_rag(collection, query_text, num_results=3, paper_id=None, published_af
     query_vector = None
     if EMBEDDING_PROVIDER != "local":
         try:
-            query_vector = get_query_embedding(query_text)
+            with timed_stage("embedding"):
+                query_vector = get_query_embedding(query_text)
         except Exception:
             query_vector = None
 
@@ -571,7 +599,8 @@ def query_rag(collection, query_text, num_results=3, paper_id=None, published_af
 
     # 3. Conversational Contextualization (only executed on cache miss)
     if chat_history and len(chat_history) > 0:
-        rephrased = rephrase_query_with_history(query_text, chat_history)
+        with timed_stage("rephrase"):
+            rephrased = rephrase_query_with_history(query_text, chat_history)
         if rephrased != query_text:
             print(f"🔄 [CONVERSATIONAL REPHRASING]:")
             print(f"   Follow-up Query:  '{query_text}'")
@@ -581,7 +610,8 @@ def query_rag(collection, query_text, num_results=3, paper_id=None, published_af
             # Recompute embedding for the rephrased query
             if EMBEDDING_PROVIDER != "local":
                 try:
-                    query_vector = get_query_embedding(query_text)
+                    with timed_stage("embedding_rephrased"):
+                        query_vector = get_query_embedding(query_text)
                 except Exception:
                     query_vector = None
 
@@ -597,7 +627,8 @@ def query_rag(collection, query_text, num_results=3, paper_id=None, published_af
 
     # 4. Auto-extract filters if none are manually specified (only executed on cache miss)
     if not paper_id and not published_after and not min_pages:
-        filters = extract_metadata_filters(query_text)
+        with timed_stage("filter_extraction"):
+            filters = extract_metadata_filters(query_text)
         clean_q = filters["clean_query"]
         
         # Apply extracted filters
@@ -630,6 +661,10 @@ def query_rag(collection, query_text, num_results=3, paper_id=None, published_af
         "published_after": published_after,
         "min_pages": min_pages
     }
+    live_fallback_allowed = live_fallback_allowed or (
+        enable_mcp_fallback and allows_live_research(query_text, paper_id=paper_id)
+    )
+    remaining_seconds()
 
     fts_db_path = os.path.join("data", "bm25_fts.db")
     has_fts_db = os.path.exists(fts_db_path)
@@ -659,6 +694,7 @@ def query_rag(collection, query_text, num_results=3, paper_id=None, published_af
     fetch_results = max(num_results * 6, 30)
         
     # --- DENSE RETRIEVAL (Chroma) ---
+    retrieval_started = time.monotonic()
     dense_candidates = []
     try:
         if EMBEDDING_PROVIDER == "local":
@@ -735,6 +771,8 @@ def query_rag(collection, query_text, num_results=3, paper_id=None, published_af
     # Print diagnostic information to trace dense vs sparse retrieval candidates
     print(f"ℹ️ Dense search retrieved {len(dense_candidates)} candidate(s). Top 3 IDs: {[c['chunk_id'] for c in dense_candidates[:3]]}")
     print(f"ℹ️ Sparse search retrieved {len(sparse_candidates)} candidate(s). Top 3 IDs: {[c[0]['chunk_id'] for c in sparse_candidates[:3]]}")
+    print(f"[RAG timing] retrieval: {(time.monotonic() - retrieval_started) * 1000:.0f} ms", flush=True)
+    remaining_seconds()
 
     # --- BLENDING (Reciprocal Rank Fusion) ---
     if not dense_candidates and not sparse_candidates:
@@ -778,7 +816,7 @@ def query_rag(collection, query_text, num_results=3, paper_id=None, published_af
             
     # Calculate RRF scores
     if not all_candidate_ids:
-        if enable_mcp_fallback:
+        if live_fallback_allowed:
             mcp_ans, mcp_sources = fallback_to_live_mcp(query_text, original_user_query, num_results, chat_history, start_time, reason="No Matching Local Documents")
             if mcp_ans is not None:
                 return mcp_ans, mcp_sources
@@ -831,7 +869,9 @@ def query_rag(collection, query_text, num_results=3, paper_id=None, published_af
         print(f"\n{refusal_msg}\n")
         return refusal_msg, []
 
-    reranked_passages = reranker.rerank(query_text, passages)
+    with timed_stage("reranking"):
+        reranked_passages = reranker.rerank(query_text, passages)
+    remaining_seconds()
     
     # --- PARENT CONTEXT RETRIEVAL & DE-DUPLICATION ---
     # Look up parent text from the registry (paper_parents.json) keyed by parent_id.
@@ -881,7 +921,7 @@ def query_rag(collection, query_text, num_results=3, paper_id=None, published_af
     print(f"ℹ️ Reranking finished. Selected {len(unique_parents)} unique parent contexts from {len(reranked_passages)} reranked candidates.")
     
     if not unique_parents:
-        if enable_mcp_fallback:
+        if live_fallback_allowed:
             mcp_ans, mcp_sources = fallback_to_live_mcp(query_text, original_user_query, num_results, chat_history, start_time, reason="Zero Local Contexts Extracted")
             if mcp_ans is not None:
                 return mcp_ans, mcp_sources
@@ -939,7 +979,7 @@ def query_rag(collection, query_text, num_results=3, paper_id=None, published_af
     top_raw_score = sources[0]["rerank_score"]
     
     if top_confidence < REFUSAL_CONFIDENCE_THRESHOLD:
-        if enable_mcp_fallback:
+        if live_fallback_allowed:
             mcp_ans, mcp_sources = fallback_to_live_mcp(query_text, original_user_query, num_results, chat_history, start_time, reason=f"Low Local Confidence ({top_confidence*100:.1f}% < {REFUSAL_CONFIDENCE_THRESHOLD*100:.0f}%)")
             if mcp_ans is not None:
                 return mcp_ans, mcp_sources
@@ -1012,7 +1052,11 @@ Answer:"""
     # Generate Answer via Gemini
     try:
         model = genai.GenerativeModel(model_name=LLM_MODEL)
-        response = model.generate_content(prompt)
+        with timed_stage("gemini_local_answer"):
+            response = model.generate_content(
+                prompt, request_options={"timeout": remaining_seconds(GEMINI_TIMEOUT_SECONDS)}
+            )
+        remaining_seconds()
         generated_answer = response.text
         
         # Store in Semantic Cache for future identical / paraphrased queries
@@ -1021,6 +1065,10 @@ Answer:"""
         print(f"⏱️ Full Pipeline Latency: {elapsed_ms:.1f}ms (Response Generated & Cached)")
         
         return generated_answer, sources
+    except QueryDeadlineExceeded:
+        return "Research query took too long. Please try a more specific question.", []
+    except (TimeoutError, GoogleDeadlineExceeded):
+        return "Gemini took too long to answer. Please try again.", []
     except Exception as e:
         return f"❌ Failed to generate response from Gemini model: {e}", sources
 

@@ -2,6 +2,7 @@ import os
 import sys
 import json
 import asyncio
+import time
 from typing import List, Dict, Any, Tuple, Optional
 from mcp import ClientSession
 from mcp.client.stdio import stdio_client, StdioServerParameters
@@ -70,7 +71,7 @@ class AcademicMCPClient:
         except Exception:
             return {"raw_text": raw}
 
-    def call_tool(self, tool_name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
+    def call_tool(self, tool_name: str, arguments: Dict[str, Any], timeout: Optional[float] = None) -> Dict[str, Any]:
         """Synchronous wrapper to execute an MCP tool via stdio with automatic direct fallback."""
         try:
             is_loop_running = False
@@ -80,30 +81,49 @@ class AcademicMCPClient:
             except RuntimeError:
                 is_loop_running = False
 
+            if timeout is not None:
+                # A bounded web request must never fall through to an unbounded direct call.
+                if is_loop_running:
+                    raise RuntimeError("Synchronous MCP call cannot run inside an event loop")
+                return asyncio.run(asyncio.wait_for(self._call_tool_stdio(tool_name, arguments), timeout=timeout))
             if is_loop_running:
                 import concurrent.futures
                 with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
                     return pool.submit(asyncio.run, self._call_tool_stdio(tool_name, arguments)).result(timeout=30)
             else:
                 return asyncio.run(self._call_tool_stdio(tool_name, arguments))
+        except TimeoutError:
+            raise
         except Exception as stdio_err:
+            if timeout is not None:
+                raise
             print(f"[MCP Client] Notice: Stdio transport ({stdio_err}). Using direct MCP call fallback...")
             return self._call_tool_direct(tool_name, arguments)
 
-    def fetch_live_papers(self, query: str, max_results: int = 4, prefer_source: str = "arxiv") -> List[Dict[str, Any]]:
+    def fetch_live_papers(self, query: str, max_results: int = 4, prefer_source: str = "arxiv", timeout: Optional[float] = None) -> List[Dict[str, Any]]:
         """
         Queries the MCP server for live academic research papers.
         Tries primary source first; if empty or rate-limited, falls back to alternative.
         """
         papers = []
+        deadline = time.monotonic() + timeout if timeout is not None else None
+
+        def time_left():
+            if deadline is None:
+                return None
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError("Live paper search exceeded its time limit")
+            return remaining
+
         if prefer_source == "semantic_scholar":
-            s2_res = self.call_tool("search_semantic_scholar", {"query": query, "limit": max_results})
+            s2_res = self.call_tool("search_semantic_scholar", {"query": query, "limit": max_results}, timeout=time_left())
             if s2_res.get("status") == "success" and s2_res.get("papers"):
                 papers.extend(s2_res["papers"])
 
         # Fallback or primary arXiv query
         if not papers:
-            arxiv_res = self.call_tool("search_arxiv", {"query": query, "max_results": max_results})
+            arxiv_res = self.call_tool("search_arxiv", {"query": query, "max_results": max_results}, timeout=time_left())
             if arxiv_res.get("status") == "success" and arxiv_res.get("papers"):
                 papers.extend(arxiv_res["papers"])
 
