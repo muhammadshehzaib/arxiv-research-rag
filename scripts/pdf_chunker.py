@@ -4,7 +4,7 @@ import json
 import re
 import time
 import arxiv
-from utils import setup_windows_encoding, clean_text, date_to_int
+from rag_system.utils import setup_windows_encoding, clean_text, date_to_int
 
 setup_windows_encoding()
 

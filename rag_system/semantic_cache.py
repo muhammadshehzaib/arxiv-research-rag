@@ -7,7 +7,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from utils import to_jsonable
+from rag_system.utils import to_jsonable
 
 CACHE_FILE_PATH = os.path.join("data", "semantic_cache.json")
 DEFAULT_SIMILARITY_THRESHOLD = float(os.getenv("SEMANTIC_CACHE_THRESHOLD", "0.92"))

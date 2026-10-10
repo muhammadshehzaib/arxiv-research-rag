@@ -142,7 +142,7 @@ def search_local_rag(query: str, num_results: int = 3) -> str:
     Query the local hybrid RAG (Chroma DB embeddings + SQLite FTS5 BM25) over indexed research papers.
     """
     try:
-        from query_rag import init_services, query_rag
+        from rag_system.query_rag import init_services, query_rag
         collection = init_services()
         answer, sources = query_rag(collection, query, num_results=num_results)
         return json.dumps({
@@ -161,7 +161,7 @@ def ingest_live_paper_to_rag(paper_id: str) -> str:
     and index it into local Chroma DB vector store and SQLite FTS5 BM25 index.
     """
     try:
-        from utils import date_to_int
+        from rag_system.utils import date_to_int
         import sqlite3
 
         paper_id = paper_id.strip()
@@ -230,7 +230,7 @@ def ingest_live_paper_to_rag(paper_id: str) -> str:
                 break
 
         # 1. Add chunks into Chroma collection
-        from query_rag import init_services
+        from rag_system.query_rag import init_services
         collection = init_services()
 
         ids = [c["chunk_id"] for c in chunks]

@@ -7,7 +7,7 @@ from typing import List, Dict, Any, Tuple, Optional
 from mcp import ClientSession
 from mcp.client.stdio import stdio_client, StdioServerParameters
 
-from utils import setup_windows_encoding
+from rag_system.utils import setup_windows_encoding
 
 setup_windows_encoding()
 
@@ -18,16 +18,12 @@ class AcademicMCPClient:
     Provides fallback to direct tool invocation if subprocess transport is unavailable.
     """
     def __init__(self, server_script: Optional[str] = None):
-        if server_script is None:
-            base_dir = os.path.dirname(os.path.abspath(__file__))
-            self.server_script = os.path.join(base_dir, "academic_mcp_server.py")
-        else:
-            self.server_script = server_script
+        self.server_script = server_script
 
     async def _call_tool_stdio(self, tool_name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
         params = StdioServerParameters(
             command=sys.executable,
-            args=[self.server_script],
+            args=[self.server_script] if self.server_script else ["-m", "rag_system.academic_mcp_server"],
             env=os.environ.copy()
         )
         async with stdio_client(params) as (read, write):
@@ -44,7 +40,7 @@ class AcademicMCPClient:
 
     def _call_tool_direct(self, tool_name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
         """In-process fallback in case stdio subprocess communication is interrupted."""
-        import academic_mcp_server
+        from rag_system import academic_mcp_server
         if tool_name == "search_arxiv":
             raw = academic_mcp_server.search_arxiv(
                 query=arguments.get("query", ""),

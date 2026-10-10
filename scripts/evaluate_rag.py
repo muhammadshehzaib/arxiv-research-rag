@@ -24,7 +24,7 @@ if GEMINI_API_KEY:
     genai.configure(api_key=GEMINI_API_KEY)
 
 # Import project's query logic
-from query_rag import init_services, query_rag, get_bm25_index
+from rag_system.query_rag import init_services, query_rag, get_bm25_index
 
 # Define fixed test evaluation set matching downloaded papers
 EVAL_QUESTIONS = [

@@ -84,7 +84,7 @@ def run_subprocess(script_name):
     
     # Run the script unbuffered and stream output
     process = subprocess.Popen(
-        [sys.executable, "-u", script_name],
+        [sys.executable, "-u", "-m", f"scripts.{os.path.splitext(script_name)[0]}"],
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,

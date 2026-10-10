@@ -4,7 +4,7 @@ import json
 import re
 from collections import defaultdict
 from typing import Dict, List, Set, Any, Optional
-from utils import setup_windows_encoding
+from rag_system.utils import setup_windows_encoding
 
 setup_windows_encoding()
 

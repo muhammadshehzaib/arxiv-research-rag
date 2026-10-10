@@ -3,10 +3,9 @@ import time
 import unittest
 from unittest.mock import patch
 
-import app
-import query_rag
-from mcp_client import AcademicMCPClient
-from query_policy import allows_live_research, quick_reply
+from rag_system import app, query_rag
+from rag_system.mcp_client import AcademicMCPClient
+from rag_system.query_policy import allows_live_research, quick_reply
 
 
 class QueryControlsTests(unittest.TestCase):
@@ -24,6 +23,12 @@ class QueryControlsTests(unittest.TestCase):
         self.assertTrue(allows_live_research("Explain Vision Transformers"))
         self.assertTrue(allows_live_research("Can you find papers about RAG?"))
         self.assertTrue(allows_live_research("Find papers about quantum computing"))
+
+    def test_filter_extraction_only_for_filter_requests(self):
+        self.assertFalse(query_rag.needs_metadata_extraction("what is rag?"))
+        self.assertTrue(query_rag.needs_metadata_extraction("RAG papers after 2025"))
+        self.assertTrue(query_rag.needs_metadata_extraction("papers with at least 10 pages"))
+        self.assertTrue(query_rag.needs_metadata_extraction("paper 2501.18365v1"))
 
     def test_api_greeting_without_database(self):
         with patch.object(app, "collection", None), patch.object(app, "init_services", side_effect=AssertionError("DB used")):

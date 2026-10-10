@@ -3,7 +3,7 @@ import sys
 import json
 import time
 import sqlite3
-from utils import setup_windows_encoding, date_to_int
+from rag_system.utils import setup_windows_encoding, date_to_int
 
 setup_windows_encoding()
 

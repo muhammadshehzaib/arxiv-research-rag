@@ -11,9 +11,9 @@ from pydantic import BaseModel
 from typing import Optional
 
 # Import RAG pipeline from query_rag
-from query_rag import init_services, query_rag
-from utils import to_jsonable
-from query_policy import QUERY_TIMEOUT_SECONDS, quick_reply
+from rag_system.query_rag import init_services, query_rag
+from rag_system.utils import to_jsonable
+from rag_system.query_policy import QUERY_TIMEOUT_SECONDS, quick_reply
 app = FastAPI(title="arXiv Research RAG Web UI")
 
 # CORS Setup to allow connections from any client
@@ -50,7 +50,7 @@ def startup_event():
         print("⚡ Using disk-backed SQLite FTS5 inverted index for BM25 search (0 MB RAM overhead).")
     else:
         try:
-            from query_rag import init_bm25
+            from rag_system.query_rag import init_bm25
             bm25, bm25_chunks = init_bm25()
             print("✅ BM25 sparse search index initialized on startup.")
         except Exception as e:
@@ -266,13 +266,13 @@ def post_eval_run():
 
 @app.get("/api/graph/stats")
 def get_graph_stats():
-    from knowledge_graph import get_knowledge_graph
+    from rag_system.knowledge_graph import get_knowledge_graph
     kg = get_knowledge_graph()
     return kg.stats()
 
 @app.get("/api/graph/paper/{paper_id}")
 def get_graph_paper(paper_id: str):
-    from knowledge_graph import get_knowledge_graph
+    from rag_system.knowledge_graph import get_knowledge_graph
     kg = get_knowledge_graph()
     network = kg.get_paper_network(paper_id)
     if not network:
@@ -281,7 +281,7 @@ def get_graph_paper(paper_id: str):
 
 @app.get("/api/graph/author/{author_name}")
 def get_graph_author(author_name: str):
-    from knowledge_graph import get_knowledge_graph
+    from rag_system.knowledge_graph import get_knowledge_graph
     kg = get_knowledge_graph()
     network = kg.get_author_network(author_name)
     if not network:
@@ -289,7 +289,7 @@ def get_graph_author(author_name: str):
     return network
 
 # Setup static folders
-static_dir = os.path.join(os.path.dirname(__file__), "static")
+static_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "static")
 os.makedirs(static_dir, exist_ok=True)
 
 @app.get("/")
@@ -306,4 +306,4 @@ if __name__ == "__main__":
     import uvicorn
     # Enable environment encoding globally for Windows consoles
     os.environ["PYTHONIOENCODING"] = "utf-8"
-    uvicorn.run("app:app", host="127.0.0.1", port=8000, reload=True)
+    uvicorn.run("rag_system.app:app", host="127.0.0.1", port=8000, reload=True)

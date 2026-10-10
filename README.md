@@ -9,14 +9,14 @@ This repository provides twin implementations in **JavaScript (Node.js/Bun)** an
 ## Project Structure
 
 ```
-├── arxiv_downloader.js   # Node.js script to query arXiv and download PDFs
-├── arxiv_downloader.py   # Python script to query arXiv and download PDFs
-├── pdf_chunker.js        # Node.js script to extract text and chunk PDFs
-├── pdf_chunker.py        # Python script to extract text and chunk PDFs
-├── package.json          # Node.js dependencies
-├── bun.lock              # Bun lockfile
-├── .gitignore            # Git ignore rules
-└── data/                 # Generated outputs (papers, metadata, and chunks)
+├── rag_system/            # Python app, RAG logic, MCP server, and shared modules
+├── scripts/               # Python download, indexing, evaluation, and migration commands
+├── tests/                 # Python tests
+├── arxiv_downloader.js    # Node.js paper downloader
+├── pdf_chunker.js         # Node.js PDF chunker
+├── package.json           # Node.js dependencies
+├── requirements.txt       # Python dependencies
+└── data/                  # Generated outputs (papers, metadata, and chunks)
 ```
 
 ---
@@ -59,34 +59,37 @@ The Python implementation uses the `arxiv` client library, `pypdf` for text extr
    * Set your `GEMINI_API_KEY` in `.env`.
 
 **Running the scripts:**
+Run these commands from the project root.
 1. **Download Phase**: Fetch papers and download PDFs:
    ```bash
-   python arxiv_downloader.py
+   python -m scripts.arxiv_downloader
    ```
 2. **Chunking Phase**: Parse PDFs and create text chunks:
    ```bash
-   python pdf_chunker.py
+   python -m scripts.pdf_chunker
    ```
 3. **Database Population**: Generate embeddings via Gemini and store them in Chroma DB:
    ```bash
-   python populate_db.py
+   python -m scripts.populate_db
    ```
 4. **RAG Querying**: Search database and answer questions using Gemini LLM:
    * **Single Query Mode**:
      ```bash
-     python query_rag.py --query "What is Retrieval Augmented Generation?"
+     python -m rag_system.query_rag --query "What is Retrieval Augmented Generation?"
      ```
    * **Interactive Chat Mode**:
      ```bash
-     python query_rag.py
+     python -m rag_system.query_rag
      ```
 
 ---
 
 ### 3. Model Context Protocol (MCP) Integration
 This repository includes a native **Model Context Protocol (MCP)** implementation:
-* **Academic MCP Server (`academic_mcp_server.py`)**: Exposes tools (`search_arxiv`, `search_semantic_scholar`, `fetch_paper_by_id`, `search_local_rag`, `ingest_live_paper_to_rag`) over stdio for external AI IDEs (Antigravity, Claude Desktop, Cursor).
-* **Live Paper MCP Fallback (`mcp_client.py`)**: Automatically connects to the MCP server whenever local vector retrieval produces insufficient evidence (< 70% confidence) or 0 matching candidates, fetching live papers and generating grounded answers.
+* **Academic MCP Server (`rag_system/academic_mcp_server.py`)**: Run with `python -m rag_system.academic_mcp_server` from the project root. It exposes tools (`search_arxiv`, `search_semantic_scholar`, `fetch_paper_by_id`, `search_local_rag`, `ingest_live_paper_to_rag`) over stdio for external AI IDEs (Antigravity, Claude Desktop, Cursor).
+* **Live Paper MCP Fallback (`rag_system/mcp_client.py`)**: Automatically connects to the MCP server whenever local vector retrieval produces insufficient evidence (< 70% confidence) or 0 matching candidates, fetching live papers and generating grounded answers.
+
+Start the web app from the project root with `python -m rag_system.app`.
 
 ---
 
@@ -99,6 +102,8 @@ This repository includes a native **Model Context Protocol (MCP)** implementatio
 
 ## Change Log & Execution History
 
+- [2026-10-11] Skipped Gemini metadata parsing for queries without date, paper ID, or page filters, reducing ordinary research query latency and timeout risk.
+- [2026-10-11] Moved Python application modules into `rag_system/` and command scripts into `scripts/`, updating imports, subprocess calls, tests, and usage instructions.
 - [2026-10-10] Added live, plain-language search progress in the chat UI, with backend status events that distinguish saved-paper search from live website search.
 
 - [2026-10-10] Added fast conversational routing, research-only live fallback, a health endpoint, bounded web queries and external calls, and per-stage RAG timing logs.

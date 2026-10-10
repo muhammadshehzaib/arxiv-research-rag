@@ -11,10 +11,10 @@ import re
 import json
 import numpy as np
 from rank_bm25 import BM25Okapi
-from semantic_cache import get_semantic_cache
-from knowledge_graph import get_knowledge_graph
-from utils import setup_windows_encoding, date_to_int, tokenize_text, get_corpus_size
-from query_policy import (
+from rag_system.semantic_cache import get_semantic_cache
+from rag_system.knowledge_graph import get_knowledge_graph
+from rag_system.utils import setup_windows_encoding, date_to_int, tokenize_text, get_corpus_size
+from rag_system.query_policy import (
     QUERY_TIMEOUT_SECONDS, MCP_SEARCH_TIMEOUT_SECONDS, GEMINI_TIMEOUT_SECONDS,
     EMBEDDING_TIMEOUT_SECONDS, QueryDeadlineExceeded, allows_live_research,
     quick_reply, remaining_seconds, set_deadline, timed_stage,
@@ -187,7 +187,7 @@ def get_reranker():
     return _reranker_instance
 
 
-from utils import setup_windows_encoding, date_to_int, tokenize_text
+from rag_system.utils import setup_windows_encoding, date_to_int, tokenize_text
 
 setup_windows_encoding()
 
@@ -342,7 +342,7 @@ def init_services():
     if not os.path.exists(CHROMA_PATH):
         raise FileNotFoundError(
             f"❌ Chroma DB not found at {CHROMA_PATH}.\n"
-            "Please run populate_db.py to create the vector database first."
+            "Please run python -m scripts.populate_db to create the vector database first."
         )
     chroma_client = chromadb.PersistentClient(path=CHROMA_PATH)
     
@@ -358,7 +358,7 @@ def init_services():
     except Exception:
         raise ValueError(
             f"❌ Collection '{COLLECTION_NAME}' does not exist in Chroma DB.\n"
-            "Please run populate_db.py to populate it."
+            "Please run python -m scripts.populate_db to populate it."
         )
 
 def get_query_embedding(query_text):
@@ -377,6 +377,16 @@ def get_query_embedding(query_text):
     except Exception as e:
         print(f"❌ Failed to generate embedding for query: {e}")
         raise e
+
+def needs_metadata_extraction(query_text):
+    """Use the LLM filter parser only for queries that mention a supported filter."""
+    return bool(
+        re.search(r"\b\d{4}\.\d{4,5}(?:v\d+)?\b", query_text, re.I)
+        or re.search(r"\b(?:after|since|from|before|in|during)\s+(?:(?:january|february|march|april|may|june|july|august|september|october|november|december)\s+)?(?:19|20)\d{2}\b", query_text, re.I)
+        or re.search(r"\b(?:at least|minimum|min|more than|over|longer than)\s+\d+\s+pages?\b", query_text, re.I)
+        or re.search(r"\b(?:recent|latest)\s+(?:papers?|research|publications?|studies)\b", query_text, re.I)
+    )
+
 
 def extract_metadata_filters(query_text):
     """
@@ -482,7 +492,7 @@ def fallback_to_live_mcp(query_text, original_user_query, num_results, chat_hist
     when the local Chroma DB vector store lacks matching documents or sufficient confidence.
     """
     try:
-        from mcp_client import get_mcp_client
+        from rag_system.mcp_client import get_mcp_client
         print(f"\n🌐 [MCP LIVE FALLBACK ACTIVATED] ({reason})")
         print(f"   Local database has insufficient context. Querying Academic MCP Server for live papers...")
         if progress:
@@ -541,7 +551,7 @@ Answer:"""
 
         # Trigger background auto-ingest into Chroma DB & FTS5 for all fetched live papers
         try:
-            from mcp_client import trigger_background_ingest
+            from rag_system.mcp_client import trigger_background_ingest
             for p in live_papers:
                 pid = p.get("paper_id")
                 if pid:
@@ -630,7 +640,7 @@ def query_rag(collection, query_text, num_results=3, paper_id=None, published_af
                 return cached_ans_rep, cached_src_rep
 
     # 4. Auto-extract filters if none are manually specified (only executed on cache miss)
-    if not paper_id and not published_after and not min_pages:
+    if not paper_id and not published_after and not min_pages and needs_metadata_extraction(query_text):
         with timed_stage("filter_extraction"):
             filters = extract_metadata_filters(query_text)
         clean_q = filters["clean_query"]

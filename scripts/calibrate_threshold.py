@@ -10,7 +10,7 @@ Finds the best REFUSAL_CONFIDENCE_THRESHOLD for YOUR specific dataset by:
   5. Picking the threshold where in-scope questions PASS and out-of-scope questions FAIL
 
 Usage:
-    python calibrate_threshold.py
+    python -m scripts.calibrate_threshold
 
 Output:
     - A table showing accuracy at each threshold
@@ -35,8 +35,8 @@ if sys.platform.startswith("win"):
 load_dotenv()
 
 # Import the RAG pipeline (needed to get real reranker scores)
-from query_rag import init_services, get_bm25_index, get_reranker, get_query_embedding, EMBEDDING_PROVIDER
-from utils import tokenize_text
+from rag_system.query_rag import init_services, get_bm25_index, get_reranker, get_query_embedding, EMBEDDING_PROVIDER
+from rag_system.utils import tokenize_text
 
 # =============================================================================
 #  TEST QUESTIONS
@@ -372,7 +372,7 @@ def main():
         collection = init_services()
     except Exception as e:
         print(f"  ERROR: Failed to initialize RAG services: {e}")
-        print("  Make sure populate_db.py has been run and .env is configured.")
+        print("  Make sure python -m scripts.populate_db has been run and .env is configured.")
         sys.exit(1)
 
     bm25, bm25_chunks = get_bm25_index()

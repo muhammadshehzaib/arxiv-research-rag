@@ -5,7 +5,7 @@ import sys
 import chromadb
 import google.generativeai as genai
 from dotenv import load_dotenv
-from utils import setup_windows_encoding, date_to_int
+from rag_system.utils import setup_windows_encoding, date_to_int
 
 setup_windows_encoding()
 
@@ -32,7 +32,7 @@ def load_chunks():
     if not os.path.exists(chunks_path):
         raise FileNotFoundError(
             f"❌ Chunks dataset not found at {chunks_path}.\n"
-            "Please make sure you have run the PDF chunker first (e.g., pdf_chunker.py)."
+            "Please make sure you have run the PDF chunker first (python -m scripts.pdf_chunker)."
         )
     with open(chunks_path, "r", encoding="utf-8") as f:
         return json.load(f)

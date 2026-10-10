@@ -3,7 +3,7 @@ import json
 import unittest
 from unittest.mock import patch
 
-import app
+from rag_system import app
 
 
 class QueryProgressTests(unittest.TestCase):
