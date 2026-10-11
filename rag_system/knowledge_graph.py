@@ -134,8 +134,24 @@ class AcademicKnowledgeGraph:
         if not os.path.exists(self.graph_file):
             return False
         try:
-            with open(self.graph_file, "r", encoding="utf-8") as f:
-                data = json.load(f)
+            if os.getenv("GRAPH_LOAD_CO_AUTHORS", "1") == "0":
+                # The precomputed coauthor map can be hundreds of MB. The other
+                # sections are enough for citations and can be loaded cheaply.
+                with open(self.graph_file, "r", encoding="utf-8") as f:
+                    lines = []
+                    for line in f:
+                        if line.startswith('  "co_authors":'):
+                            break
+                        lines.append(line)
+                    else:
+                        raise ValueError("Knowledge graph has no co_authors section")
+                prefix = "".join(lines).rstrip()
+                if not prefix.endswith(","):
+                    raise ValueError("Knowledge graph has an unexpected format")
+                data = json.loads(prefix[:-1] + "}")
+            else:
+                with open(self.graph_file, "r", encoding="utf-8") as f:
+                    data = json.load(f)
             self.papers = data.get("papers", {})
             self.authors = defaultdict(list, data.get("authors", {}))
             self.categories = defaultdict(list, data.get("categories", {}))
@@ -152,6 +168,16 @@ class AcademicKnowledgeGraph:
         except Exception as e:
             print(f"⚠️ Failed to load Knowledge Graph from {self.graph_file}: {e}")
             return False
+
+    def _coauthors_for(self, author):
+        if author in self.co_authors:
+            return self.co_authors[author]
+        collaborators = defaultdict(int)
+        for paper_id in self.authors.get(author, []):
+            for peer in self.papers.get(paper_id, {}).get("authors", []):
+                if peer != author:
+                    collaborators[peer] += 1
+        return collaborators
 
     def get_paper_network(self, paper_id: str) -> Optional[Dict[str, Any]]:
         """
@@ -185,7 +211,7 @@ class AcademicKnowledgeGraph:
         # Co-authors of paper's authors
         collaborators = defaultdict(int)
         for a in paper.get("authors", []):
-            for co_author, count in self.co_authors.get(a, {}).items():
+            for co_author, count in self._coauthors_for(a).items():
                 if co_author not in paper.get("authors", []):
                     collaborators[co_author] += count
 
@@ -241,7 +267,7 @@ class AcademicKnowledgeGraph:
         ]
 
         top_collaborators = sorted(
-            self.co_authors.get(target_author, {}).items(),
+            self._coauthors_for(target_author).items(),
             key=lambda x: x[1],
             reverse=True
         )[:5]

@@ -327,6 +327,7 @@ def search_fts(query_text, num_results=30, paper_id=None, published_after=None, 
 # Configuration
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 EMBEDDING_PROVIDER = os.getenv("EMBEDDING_PROVIDER", "gemini")
+RAG_SPARSE_ONLY = os.getenv("RAG_SPARSE_ONLY", "0") == "1"
 EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "models/gemini-embedding-001")
 LLM_MODEL = os.getenv("LLM_MODEL", "gemini-2.5-flash")
 CHROMA_PATH = os.getenv("CHROMA_PATH", "data/chroma_db")
@@ -714,7 +715,9 @@ def query_rag(collection, query_text, num_results=3, paper_id=None, published_af
     retrieval_started = time.monotonic()
     dense_candidates = []
     try:
-        if EMBEDDING_PROVIDER == "local":
+        if RAG_SPARSE_ONLY:
+            results = None
+        elif EMBEDDING_PROVIDER == "local":
             results = collection.query(
                 query_texts=[query_text],
                 n_results=fetch_results,

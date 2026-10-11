@@ -4,6 +4,11 @@ services:
     env_file: .env
     environment:
       FLASHRANK_CACHE_DIR: /root/.cache/flashrank
+      QUERY_TIMEOUT_SECONDS: "90"
+      GEMINI_TIMEOUT_SECONDS: "45"
+      GRAPH_LOAD_CO_AUTHORS: "0"
+      RAG_SPARSE_ONLY: "1"
+    restart: unless-stopped
     ports:
       - "8000:8000"
     volumes:

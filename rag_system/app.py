@@ -160,7 +160,7 @@ async def stream_query(req: QueryRequest):
         global collection
 
         def line(payload):
-            return json.dumps(payload, ensure_ascii=False) + "\n"
+            return json.dumps(to_jsonable(payload), ensure_ascii=False) + "\n"
 
         reply = quick_reply(req.query)
         if reply is not None:
