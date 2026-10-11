@@ -1,0 +1,15 @@
+services:
+  web:
+    build: .
+    env_file: .env
+    environment:
+      FLASHRANK_CACHE_DIR: /root/.cache/flashrank
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/app/data
+      - model_cache:/root/.cache
+    init: true
+
+volumes:
+  model_cache:

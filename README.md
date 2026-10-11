@@ -93,6 +93,22 @@ Start the web app from the project root with `python -m rag_system.app`.
 
 ---
 
+### 4. Run the web app locally with Docker
+
+From PowerShell in the project folder, run:
+
+```powershell
+cd D:\Ragsystem
+docker compose up --build -d
+docker compose ps
+```
+
+Open `http://localhost:8000` in your browser once `docker compose logs -f web` shows `Application startup complete`. The container reads `.env` and uses the existing `data/` folder, including its Chroma database. Set a real `GEMINI_API_KEY` in `.env`; keep `EMBEDDING_PROVIDER` consistent with the existing database. On the first start, Docker downloads the local embedding and reranking models before serving requests; their cache persists in a Docker volume.
+
+To inspect startup or query errors, run `docker compose logs -f web`. Press Ctrl+C to leave the log view. Stop the app with `docker compose down` (the database in `data/` remains on your computer).
+
+---
+
 ## Workflow Details
 
 1. **Download Phase**: The downloaders query the arXiv API, fetch matching papers, save their metadata to `data/papers_metadata.json`, and download the PDFs to `data/papers/`.
@@ -102,6 +118,7 @@ Start the web app from the project root with `python -m rag_system.app`.
 
 ## Change Log & Execution History
 
+- [2026-10-11] Added Docker Compose and a lean web image that warms local models before serving and persists their cache alongside the existing `.env` and `data/` directory.
 - [2026-10-11] Skipped Gemini metadata parsing for queries without date, paper ID, or page filters, reducing ordinary research query latency and timeout risk.
 - [2026-10-11] Moved Python application modules into `rag_system/` and command scripts into `scripts/`, updating imports, subprocess calls, tests, and usage instructions.
 - [2026-10-10] Added live, plain-language search progress in the chat UI, with backend status events that distinguish saved-paper search from live website search.

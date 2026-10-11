@@ -76,7 +76,10 @@ class Reranker:
                 try:
                     model_name = os.getenv("FLASHRANK_MODEL", "ms-marco-MiniLM-L-12-v2")
                     print(f"🤖 Initializing local FlashRank with model: {model_name}...")
-                    self.flashrank_client = Ranker(model_name=model_name)
+                    options = {"model_name": model_name}
+                    if cache_dir := os.getenv("FLASHRANK_CACHE_DIR"):
+                        options["cache_dir"] = cache_dir
+                    self.flashrank_client = Ranker(**options)
                     self.provider = "flashrank"
                     self.is_active = True
                     print("✅ FlashRank reranker initialized successfully.")
