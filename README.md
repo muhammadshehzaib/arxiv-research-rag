@@ -103,7 +103,7 @@ docker compose up --build -d
 docker compose ps
 ```
 
-Open `http://localhost:8000` in your browser once `docker compose logs -f web` shows `Application startup complete`. The container reads `.env` and uses the existing `data/` folder, including its Chroma database. Set a real `GEMINI_API_KEY` in `.env`; keep `EMBEDDING_PROVIDER` consistent with the existing database. On the first start, Docker downloads the local embedding and reranking models before serving requests; their cache persists in a Docker volume. Local Docker queries allow up to 90 seconds overall, including up to 45 seconds for Gemini. To fit this machine's memory, Docker uses the existing SQLite full-text index and reranker for search, and loads paper and citation graph data without the large precomputed coauthor map. Set `RAG_SPARSE_ONLY: "0"` in `compose.yaml` to also use Chroma dense search when more memory is available.
+Open `http://localhost:8000` in your browser once `docker compose logs -f web` shows `Application startup complete`. The container reads `.env` and uses the existing `data/` folder, including its Chroma database. Set a real `GEMINI_API_KEY` in `.env`; keep `EMBEDDING_PROVIDER` consistent with the existing database. On the first start, Docker downloads the local embedding and reranking models before serving requests; their cache persists in a Docker volume. Local Docker queries allow up to 90 seconds overall, including up to 45 seconds for Gemini. Docker uses hybrid retrieval: Chroma dense search and SQLite full-text search, combined with reciprocal rank fusion and reranking. It loads paper and citation graph data without the large precomputed coauthor map to reduce memory use. Set `RAG_SPARSE_ONLY: "1"` in `compose.yaml` if keyword-only retrieval is needed to reduce dense-search memory use.
 
 To inspect startup or query errors, run `docker compose logs -f web`. Press Ctrl+C to leave the log view. Stop the app with `docker compose down` (the database in `data/` remains on your computer).
 
@@ -118,6 +118,7 @@ To inspect startup or query errors, run `docker compose logs -f web`. Press Ctrl
 
 ## Change Log & Execution History
 
+- [2026-10-12] Enabled Chroma dense retrieval alongside SQLite keyword search in Docker, restoring hybrid retrieval with reciprocal rank fusion and reranking.
 - [2026-10-11] Converted NumPy values in streamed chat results to JSON-safe types so completed queries reach the browser instead of ending with a network error.
 - [2026-10-11] Added a lower-memory Docker query mode using SQLite full-text retrieval and reranking after Windows reported low virtual memory during dense queries.
 - [2026-10-11] Reduced Docker graph memory use by loading papers and citations without the large precomputed coauthor map and calculating collaborators on demand.

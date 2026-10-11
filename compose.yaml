@@ -7,7 +7,7 @@ services:
       QUERY_TIMEOUT_SECONDS: "90"
       GEMINI_TIMEOUT_SECONDS: "45"
       GRAPH_LOAD_CO_AUTHORS: "0"
-      RAG_SPARSE_ONLY: "1"
+      RAG_SPARSE_ONLY: "0"
     restart: unless-stopped
     ports:
       - "8000:8000"
