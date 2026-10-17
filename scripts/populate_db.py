@@ -181,24 +181,22 @@ def populate_database(rebuild=False):
             print(f"   ✅ Stored batch successfully.")
         except Exception as e:
             print(f"   ⚠️ Failed to process batch starting at index {i}. Error: {e}")
-            print("   Skipping this batch...")
+            raise RuntimeError(f"Vector ingestion failed at batch offset {i}; keyword sync was not run.") from e
         
         # Avoid hitting API rate limits too quickly if using Gemini
         if EMBEDDING_PROVIDER == "gemini":
             time.sleep(2)
 
 
-    duration = time.time() - start_time
-    print(f"\n🎉 Database population complete in {duration:.2f} seconds!")
-    print(f"👉 Total items stored in '{COLLECTION_NAME}': {collection.count()}")
-
     # Sync SQLite FTS5 inverted index with any new chunks
-    try:
-        from build_fts_index import build_index
-        print("\n🔄 Synchronizing SQLite FTS5 BM25 index...")
-        build_index()
-    except Exception as fts_err:
-        print(f"⚠️ Could not sync SQLite FTS5 index: {fts_err}")
+    from scripts.build_fts_index import build_index
+    print("\n🔄 Synchronizing SQLite FTS5 BM25 index...")
+    if not build_index():
+        raise RuntimeError("Keyword-index synchronization failed; ingestion is incomplete. Rerun population to retry.")
+
+    duration = time.time() - start_time
+    print(f"\n🎉 Database population and keyword synchronization complete in {duration:.2f} seconds!")
+    print(f"👉 Total items stored in '{COLLECTION_NAME}': {collection.count()}")
 
 if __name__ == "__main__":
     import argparse
@@ -210,3 +208,4 @@ if __name__ == "__main__":
         populate_database(rebuild=args.rebuild)
     except Exception as err:
         print(err)
+        sys.exit(1)
