@@ -256,7 +256,7 @@ def get_eval_history():
 @app.post("/api/eval/run")
 def post_eval_run():
     try:
-        from evaluate_rag import run_evaluation
+        from scripts.evaluate_rag import run_evaluation
         results = run_evaluation()
         if results is None:
             raise HTTPException(status_code=500, detail="Evaluation failed to run. Check server logs.")
