@@ -215,14 +215,20 @@ load_dotenv()
 # Global cache for lazy loading in CLI
 _bm25_global = None
 _bm25_chunks_global = None
+_parents_signature = None
 _parents_global = None  # parent registry: { parent_id -> {text, ...} }
 
 PARENTS_PATH = os.getenv("PARENTS_PATH", os.path.join("data", "paper_parents.json"))
 
 def get_parent_registry():
     """Lazily loads paper_parents.json once and caches it in memory."""
-    global _parents_global
-    if _parents_global is not None:
+    global _parents_global, _parents_signature
+    try:
+        stat = os.stat(PARENTS_PATH)
+        signature = (stat.st_mtime_ns, stat.st_size)
+    except FileNotFoundError:
+        signature = None
+    if _parents_global is not None and signature == _parents_signature:
         return _parents_global
     if not os.path.exists(PARENTS_PATH):
         print(f"⚠️ Parent registry not found at {PARENTS_PATH}. Parent context will fall back to child text.")
@@ -231,6 +237,7 @@ def get_parent_registry():
     try:
         with open(PARENTS_PATH, "r", encoding="utf-8") as f:
             _parents_global = json.load(f)
+        _parents_signature = signature
         print(f"📚 Loaded {len(_parents_global)} parent chunks from registry.")
     except Exception as e:
         print(f"❌ Error loading parent registry: {e}")

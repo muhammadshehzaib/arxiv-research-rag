@@ -5,6 +5,7 @@ import re
 import time
 import arxiv
 from rag_system.utils import setup_windows_encoding, clean_text, date_to_int
+from rag_system.ingestion import build_paper_chunks, persist_paper_records
 
 setup_windows_encoding()
 
@@ -277,69 +278,18 @@ def main():
 
         cleaned = clean_text(raw_text)
         
-        # 1. Generate Parent Chunks
-        parent_chunks = chunk_text(cleaned, PARENT_CHUNK_SIZE, PARENT_OVERLAP)
-        
-        # 2. Generate Child Chunks within Parent Chunks
-        child_global_index = 0
-        paper_child_chunks = []
-        
-        for p in parent_chunks:
-            p_text = p["text"]
-            p_idx = p["chunk_index"]
-            parent_id = f"{paper_id}_p{p_idx}"
+        paper_child_chunks, paper_parents = build_paper_chunks(cleaned, paper, total_pages)
+        parent_chunks = list(paper_parents.values())
+        persist_paper_records(paper, paper_child_chunks, paper_parents, data_dir)
+        all_chunks.extend(paper_child_chunks)
+        all_parents.update(paper_parents)
 
-            # NEW: Store parent text ONCE in the registry
-            all_parents[parent_id] = {
-                "parent_id": parent_id,
-                "paper_id": paper_id,
-                "parent_index": p_idx,
-                "text": p_text,
-                "word_count": p["word_count"],
-                "title": paper['title'],
-                "authors": paper['authors'],
-                "published": paper['published'],
-                "published_int": date_to_int(paper.get('published', '')),
-                "pdf_url": pdf_url,
-                "total_pages": total_pages,
-            }
-
-            # Sub-chunk the parent chunk's text into child chunks
-            child_chunks = chunk_text(p_text, CHILD_CHUNK_SIZE, CHILD_OVERLAP)
-
-            for c in child_chunks:
-                enriched = {
-                    "chunk_id": f"{paper_id}_c{child_global_index}",
-                    "parent_id": parent_id,          # <-- Just the reference
-                    # NO parent_text here anymore!
-                    "parent_index": p_idx,
-                    "paper_id": paper_id,
-                    "title": paper['title'],
-                    "authors": paper['authors'],
-                    "published": paper['published'],
-                    "published_int": date_to_int(paper.get('published', '')),
-                    "pdf_url": pdf_url,
-                    "total_pages": total_pages,
-                    "chunk_index": child_global_index,
-                    "text": c["text"],
-                    "word_count": c["word_count"]
-                }
-                all_chunks.append(enriched)
-                paper_child_chunks.append(enriched)
-                child_global_index += 1
-                
         print(f"📄 Paper: '{paper['title'][:50]}...'")
         print(f"   └─ Pages: {total_pages} | Words: {len(cleaned.split())} | Parents: {len(parent_chunks)} | Children (Stored): {len(paper_child_chunks)}")
         processed_count += 1
 
     out_path = os.path.join(data_dir, "paper_chunks.json")
-    with open(out_path, "w", encoding="utf-8") as f:
-        json.dump(all_chunks, f, indent=2)
-
-    # Save the parent registry so children can look up parent text by ID
     parents_path = os.path.join(data_dir, "paper_parents.json")
-    with open(parents_path, "w", encoding="utf-8") as f:
-        json.dump(all_parents, f, indent=2)
 
     print(f"\n🎉 Successfully chunked {processed_count} papers into {len(all_chunks)} chunks!")
     print(f"📚 Parent registry saved: {len(all_parents)} parents → {parents_path}")

@@ -6,6 +6,7 @@ import chromadb
 import google.generativeai as genai
 from dotenv import load_dotenv
 from rag_system.utils import setup_windows_encoding, date_to_int
+from rag_system.ingestion import chunk_metadata
 
 setup_windows_encoding()
 
@@ -139,26 +140,8 @@ def populate_database(rebuild=False):
         ids = [chunk["chunk_id"] for chunk in batch]
         documents = [chunk["text"] for chunk in batch]
         
-        # Process metadata (Chroma requires primitive types only: str, int, float, bool)
-        metadatas = []
-        for chunk in batch:
-            authors_str = ", ".join(chunk["authors"]) if isinstance(chunk["authors"], list) else str(chunk.get("authors", ""))
-            pub_date = chunk.get("published", "")
-            meta = {
-                "paper_id": chunk.get("paper_id", chunk.get("paperId", "")),
-                "title": chunk.get("title", ""),
-                "authors": authors_str,
-                "published": pub_date,
-                "published_int": date_to_int(pub_date),
-                "pdf_url": chunk.get("pdf_url", chunk.get("pdfUrl", "")),
-                "total_pages": int(chunk.get("total_pages", 0)),
-                "chunk_index": int(chunk.get("chunk_index", 0)),
-                "word_count": int(chunk.get("word_count", 0)),
-                "parent_id": chunk.get("parent_id", ""),
-                "parent_text": chunk.get("parent_text", "")
-            }
-            metadatas.append(meta)
-        
+        metadatas = [chunk_metadata(chunk) for chunk in batch]
+
         print(f"📥 Processing batch {i // batch_size + 1}/{(total_chunks + batch_size - 1) // batch_size} ({len(batch)} chunks)...")
         
         # Generate embeddings and Upsert into Chroma

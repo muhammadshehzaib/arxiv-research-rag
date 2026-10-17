@@ -109,6 +109,34 @@ def init_fts_db(db_path=FTS_DB_PATH, rebuild=False):
     return con
 
 
+def sync_paper_fts(chunks, parents, db_path=FTS_DB_PATH):
+    """Replace one paper's children and parents, including both FTS triggers."""
+    con = init_fts_db(db_path)
+    try:
+        with con:
+            paper_ids = {c["paper_id"] for c in chunks} | {p["paper_id"] for p in parents.values()}
+            for paper_id in paper_ids:
+                con.execute("DELETE FROM chunks WHERE paper_id=?", (paper_id,))
+                con.execute("DELETE FROM parents WHERE paper_id=?", (paper_id,))
+            for c in chunks:
+                authors = c.get("authors", [])
+                authors = ", ".join(authors) if isinstance(authors, list) else authors
+                con.execute("""INSERT INTO chunks (chunk_id,paper_id,title,authors,published,published_int,
+                    total_pages,chunk_index,word_count,parent_id,pdf_url,text) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    (c["chunk_id"], c["paper_id"], c.get("title", ""), authors, c.get("published", ""),
+                     c.get("published_int", 0), c.get("total_pages", 0), c["chunk_index"], c["word_count"],
+                     c["parent_id"], c.get("pdf_url", ""), c["text"]))
+            for p in parents.values():
+                authors = p.get("authors", [])
+                authors = ", ".join(authors) if isinstance(authors, list) else authors
+                con.execute("""INSERT INTO parents (parent_id,paper_id,title,authors,published,published_int,
+                    total_pages,pdf_url,word_count,text) VALUES (?,?,?,?,?,?,?,?,?,?)""",
+                    (p["parent_id"],p["paper_id"],p.get("title", ""),authors,p.get("published", ""),
+                     p.get("published_int", 0),p.get("total_pages", 0),p.get("pdf_url", ""),p["word_count"],p["text"]))
+    finally:
+        con.close()
+
+
 def build_parent_lookup(parents_path=PARENTS_JSON_PATH):
     """
     Loads paper_parents.json and returns the raw dict:

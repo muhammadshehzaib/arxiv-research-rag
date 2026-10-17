@@ -25,6 +25,7 @@ data/knowledge_graph.json
 data/bm25_fts.db*
 data/paper_parents.json
 data/evaluation.lock
+data/corpus.lock
 
 # Logs & Temporary Files
 *.log

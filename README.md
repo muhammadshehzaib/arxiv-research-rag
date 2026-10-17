@@ -122,6 +122,7 @@ To inspect startup or query errors, run `docker compose logs -f web`. Press Ctrl
 
 ## Change Log & Execution History
 
+- [2026-10-18] Unified live and batch parent/child chunking, persisted real parents and canonical records, made live indexing retryable across both stores, and refreshed parent lookup when the registry changes.
 - [2026-10-18] Made evaluations report query/judge failures explicitly, use null for unavailable metrics, score empty-context recall as zero, bypass cache/live retrieval, and support held-out datasets alongside a 15-case smoke suite.
 - [2026-10-18] Added cache TTL, bounded LRU retention, corpus/configuration invalidation, process/thread locking, atomic persistence, and concurrent-writer regression tests.
 - [2026-10-18] Isolated conversational answers from the shared semantic cache: history-bearing requests always resolve context and never read or write shared cached answers.
