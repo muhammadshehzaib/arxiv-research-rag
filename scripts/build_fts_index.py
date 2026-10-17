@@ -3,7 +3,9 @@ import sys
 import json
 import time
 import sqlite3
+from pathlib import Path
 from rag_system.utils import setup_windows_encoding, date_to_int
+from rag_system.ingestion import staged_papers, load_chunk_records
 
 setup_windows_encoding()
 
@@ -69,6 +71,14 @@ def init_fts_db(db_path=FTS_DB_PATH, rebuild=False):
     """)
 
     cur.execute("CREATE INDEX IF NOT EXISTS idx_parents_paper_id ON parents(paper_id);")
+    # Nullable columns preserve the distinction between legacy and known pages.
+    for table in ("chunks", "parents"):
+        columns = {row[1] for row in cur.execute(f"PRAGMA table_info({table})")}
+        for name in ("page_start", "page_end", "extraction_version"):
+            if name not in columns:
+                cur.execute(f"ALTER TABLE {table} ADD COLUMN {name} INTEGER")
+        if "extraction_warning" not in columns:
+            cur.execute(f"ALTER TABLE {table} ADD COLUMN extraction_warning TEXT")
 
     
     # Index important metadata columns for instant SQL filtering
@@ -122,17 +132,21 @@ def sync_paper_fts(chunks, parents, db_path=FTS_DB_PATH):
                 authors = c.get("authors", [])
                 authors = ", ".join(authors) if isinstance(authors, list) else authors
                 con.execute("""INSERT INTO chunks (chunk_id,paper_id,title,authors,published,published_int,
-                    total_pages,chunk_index,word_count,parent_id,pdf_url,text) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    total_pages,chunk_index,word_count,parent_id,pdf_url,text,page_start,page_end,extraction_version,extraction_warning)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                     (c["chunk_id"], c["paper_id"], c.get("title", ""), authors, c.get("published", ""),
                      c.get("published_int", 0), c.get("total_pages", 0), c["chunk_index"], c["word_count"],
-                     c["parent_id"], c.get("pdf_url", ""), c["text"]))
+                     c["parent_id"], c.get("pdf_url", ""), c["text"], c.get("page_start"), c.get("page_end"),
+                     c.get("extraction_version"), c.get("extraction_warning")))
             for p in parents.values():
                 authors = p.get("authors", [])
                 authors = ", ".join(authors) if isinstance(authors, list) else authors
                 con.execute("""INSERT INTO parents (parent_id,paper_id,title,authors,published,published_int,
-                    total_pages,pdf_url,word_count,text) VALUES (?,?,?,?,?,?,?,?,?,?)""",
+                    total_pages,pdf_url,word_count,text,page_start,page_end,extraction_version,extraction_warning)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                     (p["parent_id"],p["paper_id"],p.get("title", ""),authors,p.get("published", ""),
-                     p.get("published_int", 0),p.get("total_pages", 0),p.get("pdf_url", ""),p["word_count"],p["text"]))
+                     p.get("published_int", 0),p.get("total_pages", 0),p.get("pdf_url", ""),p["word_count"],p["text"],
+                     p.get("page_start"),p.get("page_end"),p.get("extraction_version"),p.get("extraction_warning")))
     finally:
         con.close()
 
@@ -153,7 +167,7 @@ def build_index(chunks_path=CHUNKS_JSON_PATH, db_path=FTS_DB_PATH, rebuild=False
     """
     Reads paper chunks and populates the SQLite FTS5 database in bulk.
     """
-    if not os.path.exists(chunks_path):
+    if not os.path.exists(chunks_path) and not any(staged_papers(Path(chunks_path).parent)):
         print(f"❌ Chunks file not found at {chunks_path}!")
         return False
         
@@ -170,12 +184,11 @@ def build_index(chunks_path=CHUNKS_JSON_PATH, db_path=FTS_DB_PATH, rebuild=False
     
     print(f"📖 Loading chunks from {chunks_path}...")
     load_start = time.time()
-    with open(chunks_path, "r", encoding="utf-8") as f:
-        chunks = json.load(f)
+    chunks = load_chunk_records(chunks_path)
     print(f"✅ Loaded {len(chunks)} chunks into memory in {time.time() - load_start:.2f}s.")
 
     print(f"📖 Loading parent registry from {PARENTS_JSON_PATH}...")
-    parent_lookup = build_parent_lookup(PARENTS_JSON_PATH)
+    parent_lookup = build_parent_lookup(str(Path(chunks_path).parent / "paper_parents.json"))
     print(f"✅ Loaded {len(parent_lookup):,} parent entries.")
     
     # Filter for new chunks if not rebuilding
@@ -252,6 +265,13 @@ def build_index(chunks_path=CHUNKS_JSON_PATH, db_path=FTS_DB_PATH, rebuild=False
     con.commit()
     print(f"   ✅ Inserted {len(parent_rows)} parents.")
     # ⬆️ END PARENTS BLOCK ⬆️
+
+    # Staged replacements carry page metadata and replace obsolete child IDs.
+    con.close()
+    for record in staged_papers(Path(chunks_path).parent):
+        sync_paper_fts(record["children"], record["parents"], db_path)
+    con = sqlite3.connect(db_path)
+    cur = con.cursor()
 
     # Optimize FTS index structure
     print("⚡ Optimizing FTS5 inverted index (merging b-tree segments)...")

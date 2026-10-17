@@ -5,7 +5,7 @@ import re
 import time
 import arxiv
 from rag_system.utils import setup_windows_encoding, clean_text, date_to_int
-from rag_system.ingestion import build_paper_chunks, persist_paper_records
+from rag_system.ingestion import build_paper_chunks, persist_paper_records, load_chunk_records, merge_paper_metadata
 
 setup_windows_encoding()
 
@@ -112,7 +112,7 @@ def fetch_missing_metadata(paper_ids):
             
     return fetched_papers
 
-def main():
+def main(reprocess=False):
     data_dir = os.path.join(".", "data")
     papers_dir = os.path.join(data_dir, "papers")
     metadata_path = os.path.join(data_dir, "papers_metadata.json")
@@ -186,8 +186,7 @@ def main():
                 existing_ids.add(pid)
         
         # Save complete metadata
-        with open(metadata_path, "w", encoding="utf-8") as f:
-            json.dump(papers_metadata, f, indent=2)
+        merge_paper_metadata(papers_metadata, data_dir)
         print(f"💾 Updated metadata saved to: {metadata_path}")
 
     # Filter metadata to keep only the downloaded papers
@@ -207,12 +206,15 @@ def main():
     if os.path.exists(out_path):
         try:
             with open(out_path, "r", encoding="utf-8") as f:
-                existing_chunks = json.load(f)
+                existing_chunks = load_chunk_records(out_path)
                 for c in existing_chunks:
                     already_saved_ids.add(c.get("paper_id"))
             print(f"📦 Loaded {len(existing_chunks)} existing chunks for {len(already_saved_ids)} papers from cache.")
         except Exception as e:
             print(f"⚠️ Error reading existing chunks: {e}")
+
+    if not os.path.exists(out_path):
+        existing_chunks = load_chunk_records(out_path)
 
     # Build active paper IDs lookup
     active_paper_ids = {p.get('paperId') or p.get('paper_id') for p in active_metadata}
@@ -222,16 +224,10 @@ def main():
     all_chunks = [c for c in existing_chunks if c.get("paper_id") in active_paper_ids]
     already_saved_ids = {c.get("paper_id") for c in all_chunks}
 
-    # NEW: Load existing parent registry if it exists
-    parents_path = os.path.join(data_dir, "paper_parents.json")
-    all_parents = {}
-    if os.path.exists(parents_path):
-        try:
-            with open(parents_path, "r", encoding="utf-8") as f:
-                all_parents = json.load(f)
-            print(f"📦 Loaded {len(all_parents)} existing parent chunks from cache.")
-        except Exception as e:
-            print(f"⚠️ Error reading existing parents: {e}")
+    # Per-paper records avoid holding the parent registry during extraction.
+    del existing_chunks, all_chunks
+    processed_children = 0
+    processed_parents = 0
 
     processed_count = 0
 
@@ -239,7 +235,7 @@ def main():
         paper_id = paper.get('paperId') or paper.get('paper_id')
         
         # Skip if we already have chunks for this paper
-        if paper_id in already_saved_ids:
+        if paper_id in already_saved_ids and not reprocess:
             continue
             
         pdf_url = paper.get('pdfUrl') or paper.get('pdf_url')
@@ -257,44 +253,35 @@ def main():
             print(f"⚠️ PDF missing: {pdf_path}. Skipping.")
             continue
 
-        raw_text = ""
-        total_pages = 0
-
-        if has_pypdf:
-            try:
-                reader = PdfReader(pdf_path)
-                total_pages = len(reader.pages)
-                for page in reader.pages:
-                    txt = page.extract_text()
-                    if txt:
-                        raw_text += txt + " "
-            except Exception as e:
-                print(f"❌ Error reading PDF {pdf_path}: {e}")
-                continue
-
-        if not raw_text.strip():
-            print(f"⚠️ Could not extract text from {filename} (pypdf missing or empty).")
-            continue
-
-        cleaned = clean_text(raw_text)
-        
-        paper_child_chunks, paper_parents = build_paper_chunks(cleaned, paper, total_pages)
+        from rag_system.pdf_extraction import extract_pdf
+        try:
+            pages = extract_pdf(pdf_path)
+            total_pages = len(pages)
+            if not any(page["text"].strip() for page in pages):
+                raise RuntimeError("No readable text; enable PDF_OCR_ENABLED or PDF_VISUAL_MODE.")
+            paper_child_chunks, paper_parents = build_paper_chunks(pages, paper, total_pages)
+        except Exception as exc:
+            print(f"PDF extraction failed for {paper_id}: {type(exc).__name__}: {exc}")
+            raise
         parent_chunks = list(paper_parents.values())
-        persist_paper_records(paper, paper_child_chunks, paper_parents, data_dir)
-        all_chunks.extend(paper_child_chunks)
-        all_parents.update(paper_parents)
+        persist_paper_records(paper, paper_child_chunks, paper_parents, data_dir, pages=pages)
+        processed_children += len(paper_child_chunks)
+        processed_parents += len(paper_parents)
 
         print(f"📄 Paper: '{paper['title'][:50]}...'")
         print(f"   └─ Pages: {total_pages} | Words: {len(cleaned.split())} | Parents: {len(parent_chunks)} | Children (Stored): {len(paper_child_chunks)}")
         processed_count += 1
 
-    out_path = os.path.join(data_dir, "paper_chunks.json")
-    parents_path = os.path.join(data_dir, "paper_parents.json")
+    out_path = os.path.join(data_dir, "paper_records")
+    parents_path = out_path
 
-    print(f"\n🎉 Successfully chunked {processed_count} papers into {len(all_chunks)} chunks!")
-    print(f"📚 Parent registry saved: {len(all_parents)} parents → {parents_path}")
+    print(f"\n🎉 Successfully chunked {processed_count} papers into {processed_children} new chunks!")
+    print(f"📚 Parent registry saved: {processed_parents} new parents → {parents_path}")
     print(f"💾 Output saved to: {out_path}")
 
 
 if __name__ == "__main__":
-    main()
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--reprocess", action="store_true", help="Re-extract existing PDFs with page provenance.")
+    main(reprocess=parser.parse_args().reprocess)

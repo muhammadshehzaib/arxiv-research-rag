@@ -117,6 +117,12 @@ For hosted access, set a strong `RAG_API_TOKEN` and `RAG_AUTH_MODE=token` in `.e
 
 Operational JSON events carry `request_id`; clients may send `X-Request-ID` and receive it back. `/api/metrics` uses the same authentication as the rest of the API and exposes per-process request/error counts, recent latency, generation token usage, and `active_alerts` when recent errors exceed `RAG_ALERT_FAILURE_THRESHOLD`. Connect a monitoring service to these metrics/log alerts for external notifications. Token usage and USD estimates cover generation calls only. Configure `RAG_MODEL_PRICING_JSON` with your actual per-million input/output rates; estimates remain unavailable for unpriced calls. `LLM_FALLBACK_MODELS` accepts an ordered list of models available to your existing Gemini account. Retries and fallback obey the request deadline; a project-wide quota exhaustion may affect every model in the chain.
 
+PDF ingestion uses PyMuPDF to retain numbered pages, text-block coordinates, and detected tables as Markdown. Parents never cross page boundaries. Source cards show the page and link to `#page=N` in the original PDF; legacy chunks retain an unknown page rather than an invented reference. Per-paper records in `data/paper_records/` preserve extraction details and override legacy bulk records without rewriting the multi-GB chunk JSON for each live paper. Dense and keyword indexing both consume these records.
+
+Set `PDF_OCR_ENABLED=1` for scanned text (requires Tesseract; included in the Docker image). Set `PDF_VISUAL_MODE=1` to send visual pages to the configured Gemini model for model-assisted transcription of figures, equations, and tables; this makes additional API calls during ingestion. `PDF_VISION_MODEL` can select a vision-capable model available in your account. Text-only mode records warnings where visual evidence may be missing. Even visual transcription can be uncertain; the original page remains the source of truth.
+
+Existing embeddings cannot recover page positions that were discarded. To migrate existing PDFs, explicitly run `python -m scripts.pdf_chunker --reprocess` and then `python -m scripts.populate_db --refresh`. Refresh recomputes embeddings and replaces obsolete chunk IDs; back up your corpus before a large migration. These potentially long indexing commands are not run automatically by the web app or this change.
+
 ## Workflow Details
 
 1. **Download Phase**: The downloaders query the arXiv API, fetch matching papers, save their metadata to `data/papers_metadata.json`, and download the PDFs to `data/papers/`.
@@ -126,6 +132,7 @@ Operational JSON events carry `request_id`; clients may send `X-Request-ID` and 
 
 ## Change Log & Execution History
 
+- [2026-10-18] Preserved PDF page/block/table provenance, added optional OCR and visual transcription with explicit coverage warnings, linked citations to source pages, staged paper records without rewriting the large corpus, and added refresh/migration support.
 - [2026-10-18] Added request-correlated structured events, protected operational metrics and error alerts, generation token/configured-cost accounting, and bounded retry/fallback models under the request deadline.
 - [2026-10-18] Added hosted bearer authentication, local-only defaults, per-client rate/body/input limits, explicit CORS, safe source/evaluation rendering, localhost Docker binding, and restored verified TLS downloads.
 - [2026-10-18] Unified live and batch parent/child chunking, persisted real parents and canonical records, made live indexing retryable across both stores, and refreshed parent lookup when the registry changes.

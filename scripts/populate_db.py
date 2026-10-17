@@ -6,7 +6,7 @@ import chromadb
 import google.generativeai as genai
 from dotenv import load_dotenv
 from rag_system.utils import setup_windows_encoding, date_to_int
-from rag_system.ingestion import chunk_metadata
+from rag_system.ingestion import chunk_metadata, load_chunk_records
 
 setup_windows_encoding()
 
@@ -30,13 +30,11 @@ def init_gemini():
 
 def load_chunks():
     chunks_path = os.path.join("data", "paper_chunks.json")
-    if not os.path.exists(chunks_path):
-        raise FileNotFoundError(
-            f"❌ Chunks dataset not found at {chunks_path}.\n"
-            "Please make sure you have run the PDF chunker first (python -m scripts.pdf_chunker)."
-        )
-    with open(chunks_path, "r", encoding="utf-8") as f:
-        return json.load(f)
+    chunks = load_chunk_records(chunks_path)
+    if not chunks:
+        raise FileNotFoundError("No chunk records found; run the PDF chunker first.")
+    return chunks
+
 
 def embed_texts(texts, model=EMBEDDING_MODEL):
     """
@@ -67,7 +65,7 @@ def embed_texts(texts, model=EMBEDDING_MODEL):
             raise e
 
 
-def populate_database(rebuild=False):
+def populate_database(rebuild=False, refresh=False):
     print("🚀 Initializing RAG Database Population...")
     
     # 1. Initialize Gemini
@@ -125,7 +123,7 @@ def populate_database(rebuild=False):
         existing_ids = set()
 
     # Filter to only keep chunks not already in the vector database
-    new_chunks = [c for c in chunks if c["chunk_id"] not in existing_ids]
+    new_chunks = [c for c in chunks if refresh or c["chunk_id"] not in existing_ids]
     total_new_chunks = len(new_chunks)
     print(f"📦 Populating collection '{COLLECTION_NAME}' with {total_new_chunks} new chunks...")
 
@@ -171,6 +169,11 @@ def populate_database(rebuild=False):
             time.sleep(2)
 
 
+    if refresh:
+        obsolete = existing_ids - {chunk["chunk_id"] for chunk in chunks}
+        if obsolete:
+            collection.delete(ids=list(obsolete))
+
     # Sync SQLite FTS5 inverted index with any new chunks
     from scripts.build_fts_index import build_index
     print("\n🔄 Synchronizing SQLite FTS5 BM25 index...")
@@ -185,10 +188,11 @@ if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description="Populate the Chroma Vector Database.")
     parser.add_argument("--rebuild", action="store_true", help="Delete and recreate the Chroma collection.")
+    parser.add_argument("--refresh", action="store_true", help="Re-embed and update all canonical chunks, including page provenance.")
     args = parser.parse_args()
     
     try:
-        populate_database(rebuild=args.rebuild)
+        populate_database(rebuild=args.rebuild, refresh=args.refresh)
     except Exception as err:
         print(err)
         sys.exit(1)

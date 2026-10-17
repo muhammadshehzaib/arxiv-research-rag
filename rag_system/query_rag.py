@@ -10,12 +10,15 @@ from dotenv import load_dotenv
 import re
 import json
 import inspect
+from pathlib import Path
+from contextlib import closing
 from rank_bm25 import BM25Okapi
 from rag_system.semantic_cache import get_semantic_cache
 from rag_system.knowledge_graph import get_knowledge_graph
 from rag_system.relevance import finite_raw_score, normalize_relevance_score, get_relevance_threshold
 from rag_system.storage import corpus_version
 from rag_system.generation import generate_content
+from rag_system.ingestion import load_chunk_records, paper_record_path, chunk_metadata
 from rag_system.utils import setup_windows_encoding, date_to_int, tokenize_text, get_corpus_size
 from rag_system.query_policy import (
     QUERY_TIMEOUT_SECONDS, MCP_SEARCH_TIMEOUT_SECONDS, GEMINI_TIMEOUT_SECONDS,
@@ -245,16 +248,42 @@ def get_parent_registry():
         _parents_global = {}
     return _parents_global
 
+def get_parent_contexts(parent_ids, db_path=os.path.join("data", "bm25_fts.db")):
+    """Resolve only selected parents; avoid loading the large registry for live papers."""
+    missing = {pid for pid in parent_ids if pid}
+    result = {}
+    if not missing:
+        return result
+    try:
+        path = Path(db_path).resolve().as_posix()
+        with closing(sqlite3.connect("file:" + path + "?mode=ro", uri=True)) as con:
+            con.row_factory = sqlite3.Row
+            rows = con.execute("SELECT * FROM parents WHERE parent_id IN (" + ",".join("?" for _ in missing) + ")",
+                               tuple(missing)).fetchall()
+            result = {row["parent_id"]: dict(row) for row in rows}
+            missing -= result.keys()
+    except sqlite3.Error:
+        pass
+    for parent_id in list(missing):
+        paper_id = parent_id.rsplit("_p", 1)[0]
+        path = paper_record_path(paper_id, Path(PARENTS_PATH).parent)
+        if path.exists():
+            record = json.loads(path.read_text(encoding="utf-8"))
+            if parent_id in record["parents"]:
+                result[parent_id] = record["parents"][parent_id]
+                missing.remove(parent_id)
+    if missing:
+        registry = get_parent_registry()
+        result.update({pid: registry[pid] for pid in missing if pid in registry})
+    return result
+
+
 def init_bm25(chunks_path=os.path.join("data", "paper_chunks.json")):
     """
     Loads chunks and initializes BM25 index.
     """
-    if not os.path.exists(chunks_path):
-        print(f"⚠️ BM25 warning: Chunks dataset not found at {chunks_path}.")
-        return None, None
     try:
-        with open(chunks_path, "r", encoding="utf-8") as f:
-            chunks = json.load(f)
+        chunks = load_chunk_records(chunks_path)
         if not chunks:
             return None, None
         
@@ -318,12 +347,16 @@ def search_fts(query_text, num_results=30, paper_id=None, published_after=None, 
     try:
         con = sqlite3.connect(db_path)
         cur = con.cursor()
+        columns = {row[1] for row in cur.execute("PRAGMA table_info(chunks)")}
+        extras = ", ".join("c." + key if key in columns else "NULL" for key in
+                           ("page_start", "page_end", "extraction_warning"))
+        sql = sql.replace("c.text, f.rank", "c.text, " + extras + ", f.rank")
         rows = cur.execute(sql, tuple(params)).fetchall()
         con.close()
         
         results = []
         for idx, r in enumerate(rows):
-            cid, pid, title, authors, published, p_int, pages, c_idx, words, parent_id, pdf_url, text, rank = r
+            cid, pid, title, authors, published, p_int, pages, c_idx, words, parent_id, pdf_url, text, page_start, page_end, warning, rank = r
             chunk = {
                 "chunk_id": cid,
                 "paper_id": pid,
@@ -335,6 +368,9 @@ def search_fts(query_text, num_results=30, paper_id=None, published_after=None, 
                 "chunk_index": c_idx,
                 "word_count": words,
                 "parent_id": parent_id,
+                "page_start": page_start,
+                "page_end": page_end,
+                "extraction_warning": warning,
                 # parent_text is no longer stored inline — resolved at query time via get_parent_registry()
                 "pdf_url": pdf_url,
                 "text": text
@@ -844,18 +880,7 @@ def query_rag(collection, query_text, num_results=3, paper_id=None, published_af
         cid = chunk["chunk_id"]
         if cid not in chunk_lookup:
             authors_str = ", ".join(chunk["authors"]) if isinstance(chunk["authors"], list) else str(chunk.get("authors", ""))
-            meta = {
-                "paper_id": chunk.get("paper_id", chunk.get("paperId", "")),
-                "title": chunk.get("title", ""),
-                "authors": authors_str,
-                "published": chunk.get("published", ""),
-                "pdf_url": chunk.get("pdf_url", chunk.get("pdfUrl", "")),
-                "total_pages": int(chunk.get("total_pages", 0)),
-                "chunk_index": int(chunk.get("chunk_index", 0)),
-                "word_count": int(chunk.get("word_count", 0)),
-                "parent_id": chunk.get("parent_id", ""),
-                # parent_text removed — resolved at query time via get_parent_registry()
-            }
+            meta = chunk_metadata(chunk)
             chunk_lookup[cid] = {
                 "text": chunk["text"],
                 "metadata": meta,
@@ -911,7 +936,7 @@ def query_rag(collection, query_text, num_results=3, paper_id=None, published_af
     # --- PARENT CONTEXT RETRIEVAL & DE-DUPLICATION ---
     # Look up parent text from the registry (paper_parents.json) keyed by parent_id.
     # This avoids embedding the full parent text in every child's metadata.
-    parent_registry = get_parent_registry()
+    parent_registry = get_parent_contexts(p["metadata"].get("parent_id") for p in reranked_passages)
 
     unique_parents = []
     seen_parent_ids = set()
@@ -920,6 +945,11 @@ def query_rag(collection, query_text, num_results=3, paper_id=None, published_af
 
         # Resolve parent text: first try registry, fall back to legacy inline field (old DB rows)
         parent_entry = parent_registry.get(pid) if pid else None
+        if parent_entry:
+            p["metadata"] = dict(p["metadata"], **{
+                key: parent_entry[key] for key in ("page_start", "page_end", "extraction_warning")
+                if parent_entry.get(key) is not None
+            })
         p_text = (
             parent_entry["text"]
             if parent_entry
@@ -985,6 +1015,13 @@ def query_rag(collection, query_text, num_results=3, paper_id=None, published_af
         pdf_url = meta.get("pdf_url", "")
         paper_id = meta.get("paper_id", "")
         chunk_idx = meta.get("chunk_index", 0)
+        page_start, page_end = meta.get("page_start"), meta.get("page_end")
+        if page_start:
+            pdf_url = pdf_url.split("#", 1)[0] + f"#page={page_start}" if pdf_url else ""
+        page_label = f"Page {page_start}" if page_start else "Page location unavailable (legacy extraction)"
+        warning = meta.get("extraction_warning", "")
+        coverage = warning or ("Text and detected table structure extracted." if page_start
+                               else "Legacy text extraction; table and visual coverage unknown.")
         
         # Relevance describes this query/passage match, not answer correctness.
         raw_score = item["score"]
@@ -993,6 +1030,8 @@ def query_rag(collection, query_text, num_results=3, paper_id=None, published_af
         block = (
             f"Source [{i+1}]: {title} (ID: {paper_id}, Chunk: {chunk_idx})\n"
             f"Authors: {authors}\n"
+            f"Location: {page_label}\n"
+            f"Extraction coverage: {coverage}\n"
             f"Text content:\n{doc}\n"
         )
         context_blocks.append(block)
@@ -1003,6 +1042,9 @@ def query_rag(collection, query_text, num_results=3, paper_id=None, published_af
             "authors": authors,
             "pdf_url": pdf_url,
             "paper_id": paper_id,
+            "page_start": page_start,
+            "page_end": page_end,
+            "extraction_warning": warning,
             "relevance_score": relevance_score,
             "reranker_provider": item["reranker_provider"],
             "rrf_score": item["rrf_score"],

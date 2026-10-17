@@ -7,3 +7,4 @@ flashrank>=0.2.0
 cohere>=5.0.0
 mcp>=1.0.0
 filelock>=3.12,<4
+pymupdf>=1.26,<2

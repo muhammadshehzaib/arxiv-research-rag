@@ -72,6 +72,9 @@ class RagSources extends HTMLElement {
                 <span class="source-idx">Source [${escapeHTML(src.index)}]</span>
                 <h4>${escapeHTML(src.title)}</h4>
                 <div class="source-authors">Authors: ${escapeHTML(src.authors)}</div>
+                <div class="source-authors">${src.page_start ? `Page ${escapeHTML(src.page_start)}`
+                    : src.is_live_mcp ? "Live abstract" : "Page location not indexed"}</div>
+                ${src.extraction_warning ? `<div class="source-authors">${escapeHTML(src.extraction_warning)}</div>` : ""}
                 <div class="source-footer">
                     <div class="score-badge" title="Retrieval relevance is not answer confidence.">
                         <i data-lucide="compass" style="width: 13px; height: 13px;"></i>

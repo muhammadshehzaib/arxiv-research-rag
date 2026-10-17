@@ -180,18 +180,11 @@ def ingest_live_paper_to_rag(paper_id: str) -> str:
             from urllib.request import urlretrieve
             urlretrieve(result.pdf_url, filepath)
             
-        # Parse PDF using pypdf
-        import pypdf
-        reader = pypdf.PdfReader(filepath)
-        full_text = ""
-        total_pages = len(reader.pages)
-        for page in reader.pages:
-            t = page.extract_text()
-            if t:
-                full_text += t + "\n"
-                
-        if not full_text.strip():
-            return json.dumps({"status": "empty_pdf", "message": "Could not extract text from PDF."}, indent=2)
+        from rag_system.pdf_extraction import extract_pdf
+        pages = extract_pdf(filepath)
+        total_pages = len(pages)
+        if not any(page["text"].strip() for page in pages):
+            raise RuntimeError("PDF has no readable text; enable OCR or visual extraction.")
 
         from rag_system.ingestion import build_paper_chunks, index_paper
         from rag_system.query_rag import init_services
@@ -201,8 +194,8 @@ def ingest_live_paper_to_rag(paper_id: str) -> str:
             "published": result.published.strftime("%Y-%m-%d"),
             "summary": result.summary, "pdf_url": result.pdf_url, "categories": result.categories,
         }
-        chunks, parents = build_paper_chunks(full_text, paper, total_pages)
-        index_paper(init_services(), paper, chunks, parents)
+        chunks, parents = build_paper_chunks(pages, paper, total_pages)
+        index_paper(init_services(), paper, chunks, parents, pages=pages)
 
         return json.dumps({
             "status": "success",

@@ -26,6 +26,7 @@ data/bm25_fts.db*
 data/paper_parents.json
 data/evaluation.lock
 data/corpus.lock
+data/paper_records/
 
 # Logs & Temporary Files
 *.log

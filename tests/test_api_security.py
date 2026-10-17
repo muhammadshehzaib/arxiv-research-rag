@@ -22,6 +22,10 @@ class ApiSecurityTests(unittest.TestCase):
                                         headers={"Authorization": "Bearer test-token"})
             self.assertEqual(response.status_code, 200)
             self.assertEqual(self.client.get("/api/health").status_code, 200)
+            response = self.client.post("/api/query/stream", json={"query": "hello"},
+                                        headers={"Authorization": "Bearer test-token"})
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.json()["type"], "result")
 
     def test_hosted_access_fails_closed_without_token(self):
         with patch.dict(os.environ, {"RAG_AUTH_MODE": "token"}):
