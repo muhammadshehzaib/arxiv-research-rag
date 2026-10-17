@@ -118,6 +118,7 @@ To inspect startup or query errors, run `docker compose logs -f web`. Press Ctrl
 
 ## Change Log & Execution History
 
+- [2026-10-17] Fixed empty local retrieval to attempt permitted MCP live fallback before returning no results, removed the unreachable fallback branch, and added regression coverage.
 - [2026-10-12] Enabled Chroma dense retrieval alongside SQLite keyword search in Docker, restoring hybrid retrieval with reciprocal rank fusion and reranking.
 - [2026-10-11] Converted NumPy values in streamed chat results to JSON-safe types so completed queries reach the browser instead of ending with a network error.
 - [2026-10-11] Added a lower-memory Docker query mode using SQLite full-text retrieval and reranking after Windows reported low virtual memory during dense queries.

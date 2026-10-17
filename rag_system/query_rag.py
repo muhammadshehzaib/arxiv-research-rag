@@ -796,6 +796,18 @@ def query_rag(collection, query_text, num_results=3, paper_id=None, published_af
 
     # --- BLENDING (Reciprocal Rank Fusion) ---
     if not dense_candidates and not sparse_candidates:
+        if live_fallback_allowed:
+            live_answer, live_sources = fallback_to_live_mcp(
+                query_text,
+                original_user_query,
+                num_results,
+                chat_history,
+                start_time,
+                reason="No Matching Local Documents",
+                progress=progress,
+            )
+            if live_answer is not None:
+                return live_answer, live_sources
         return "No relevant papers found matching your query or filters.", []
 
     # Map chunk_ids to their ranks (1-indexed) in their respective result sets
@@ -835,19 +847,6 @@ def query_rag(collection, query_text, num_results=3, paper_id=None, published_af
             }
             
     # Calculate RRF scores
-    if not all_candidate_ids:
-        if live_fallback_allowed:
-            mcp_ans, mcp_sources = fallback_to_live_mcp(query_text, original_user_query, num_results, chat_history, start_time, reason="No Matching Local Documents", progress=progress)
-            if mcp_ans is not None:
-                return mcp_ans, mcp_sources
-        corpus_size = get_corpus_size()
-        refusal_msg = (
-            "🛡️ [REFUSAL LADDER ACTIVATED - Rung 1: No Matching Documents]\n\n"
-            f"Based on the {corpus_size:,} arXiv research papers in the database, no documents matching this query or the active filters were found."
-        )
-        print(f"\n{refusal_msg}\n")
-        return refusal_msg, []
-
     k = 60
     rrf_scores = []
     for cid in all_candidate_ids:
