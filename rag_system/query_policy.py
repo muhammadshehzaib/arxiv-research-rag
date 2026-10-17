@@ -39,7 +39,8 @@ def timed_stage(name):
     try:
         yield
     finally:
-        print(f"[RAG timing] {name}: {(time.monotonic() - started) * 1000:.0f} ms", flush=True)
+        from rag_system.observability import event
+        event("pipeline_stage", stage=name, duration_ms=round((time.monotonic() - started) * 1000, 2))
 
 
 def quick_reply(query):

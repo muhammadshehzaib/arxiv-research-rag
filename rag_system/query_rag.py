@@ -15,6 +15,7 @@ from rag_system.semantic_cache import get_semantic_cache
 from rag_system.knowledge_graph import get_knowledge_graph
 from rag_system.relevance import finite_raw_score, normalize_relevance_score, get_relevance_threshold
 from rag_system.storage import corpus_version
+from rag_system.generation import generate_content
 from rag_system.utils import setup_windows_encoding, date_to_int, tokenize_text, get_corpus_size
 from rag_system.query_policy import (
     QUERY_TIMEOUT_SECONDS, MCP_SEARCH_TIMEOUT_SECONDS, GEMINI_TIMEOUT_SECONDS,
@@ -442,9 +443,8 @@ Respond ONLY with a valid JSON object matching the schema below:
 }}"""
     
     try:
-        model = genai.GenerativeModel(model_name=LLM_MODEL)
         # Force JSON response schema
-        response = model.generate_content(
+        response = generate_content(
             prompt,
             generation_config={"response_mime_type": "application/json"},
             request_options={"timeout": remaining_seconds(GEMINI_TIMEOUT_SECONDS)},
@@ -502,8 +502,7 @@ Latest User Question: "{query_text}"
 Standalone Search Query:"""
 
     try:
-        model = genai.GenerativeModel(model_name=LLM_MODEL)
-        response = model.generate_content(prompt, request_options={"timeout": remaining_seconds(GEMINI_TIMEOUT_SECONDS)})
+        response = generate_content(prompt, request_options={"timeout": remaining_seconds(GEMINI_TIMEOUT_SECONDS)})
         standalone_query = response.text.strip().strip('"').strip("'")
         if standalone_query and len(standalone_query) > 0:
             return standalone_query
@@ -566,9 +565,8 @@ Question: {original_user_query}
 
 Answer:"""
 
-        model = genai.GenerativeModel(model_name=LLM_MODEL)
         with timed_stage("gemini_live_answer"):
-            response = model.generate_content(
+            response = generate_content(
                 prompt, request_options={"timeout": remaining_seconds(GEMINI_TIMEOUT_SECONDS)}
             )
         remaining_seconds()
@@ -1093,9 +1091,8 @@ Answer:"""
     try:
         if progress:
             progress("writing_local_answer")
-        model = genai.GenerativeModel(model_name=LLM_MODEL)
         with timed_stage("gemini_local_answer"):
-            response = model.generate_content(
+            response = generate_content(
                 prompt, request_options={"timeout": remaining_seconds(GEMINI_TIMEOUT_SECONDS)}
             )
         remaining_seconds()

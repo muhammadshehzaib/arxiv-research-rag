@@ -3,6 +3,7 @@ import json
 import asyncio
 import time
 from functools import partial
+from contextvars import copy_context
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -10,6 +11,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field, field_validator
 from typing import Optional, Literal
 from rag_system.security import guard_api
+from rag_system.observability import ObservabilityMiddleware, metrics_snapshot
 
 # Import RAG pipeline from query_rag
 from rag_system.query_rag import init_services, query_rag
@@ -26,6 +28,7 @@ app.add_middleware(
     allow_headers=["Authorization", "Content-Type", "X-Request-ID"],
 )
 app.middleware("http")(guard_api)
+app.add_middleware(ObservabilityMiddleware)
 
 # Global database collection and BM25 search reference
 collection = None
@@ -38,6 +41,11 @@ query_slots = asyncio.Semaphore(4)
 def get_health():
     """Cheap service check; readiness indicates whether RAG initialized at startup."""
     return {"status": "ok", "rag_ready": collection is not None}
+
+
+@app.get("/api/metrics")
+def get_metrics():
+    return metrics_snapshot()
 
 @app.on_event("startup")
 def startup_event():
@@ -154,7 +162,7 @@ async def post_query(req: QueryRequest):
             enable_mcp_fallback=req.enable_mcp_fallback if req.enable_mcp_fallback is not None else True,
             deadline=deadline,
         )
-        future = asyncio.get_running_loop().run_in_executor(None, work)
+        future = asyncio.get_running_loop().run_in_executor(None, copy_context().run, work)
         future.add_done_callback(lambda completed: query_slots.release())
         answer, sources = await asyncio.wait_for(
             asyncio.shield(future), timeout=max(0.1, deadline - time.monotonic())
@@ -230,7 +238,7 @@ async def stream_query(req: QueryRequest):
             deadline=deadline,
             progress=progress,
         )
-        future = loop.run_in_executor(None, work)
+        future = loop.run_in_executor(None, copy_context().run, work)
         future.add_done_callback(finished)
 
         while True:

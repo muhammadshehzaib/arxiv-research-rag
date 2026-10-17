@@ -10,6 +10,8 @@ from dotenv import load_dotenv
 
 from rag_system.query_rag import init_services, query_rag, get_bm25_index
 from rag_system.storage import atomic_write_json, corpus_version
+from rag_system.generation import generate_content
+from rag_system.query_policy import set_deadline
 
 load_dotenv()
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
@@ -73,13 +75,9 @@ def parse_json_array(text):
 
 
 def generate_content_with_retry(model, prompt, max_retries=3):
-    for attempt in range(max_retries):
-        try:
-            return model.generate_content(prompt, request_options={"timeout": 20})
-        except Exception as exc:
-            if attempt + 1 == max_retries or not any(term in str(exc).lower() for term in ("429", "quota", "503", "unavailable")):
-                raise
-            time.sleep(2 ** attempt)
+    set_deadline(time.monotonic() + 40)
+    return generate_content(prompt, model_name=os.getenv("EVAL_LLM_MODEL", os.getenv("LLM_MODEL", "gemini-2.5-flash")),
+                            primary_model=model, request_options={"timeout": 20})
 
 
 def get_embedding_with_retry(model_name, content, max_retries=3):
