@@ -1,5 +1,4 @@
 import os
-import ssl
 import sys
 import time
 import subprocess
@@ -7,11 +6,6 @@ import json
 import arxiv
 from urllib.request import urlretrieve
 
-# Bypass SSL context verification issues (common in Windows setups)
-try:
-    ssl._create_default_https_context = ssl._create_unverified_context
-except AttributeError:
-    pass
 
 # Predefined query list to scan arXiv for a wide selection of relevant papers
 QUERIES = [

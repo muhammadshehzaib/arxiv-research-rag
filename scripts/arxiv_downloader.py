@@ -1,14 +1,8 @@
 import arxiv
 import os
 import json
-import ssl
 from datetime import datetime
 
-# Bypass SSL certificate verification issues (common in local Python setups)
-try:
-    ssl._create_default_https_context = ssl._create_unverified_context
-except AttributeError:
-    pass
 
 def fetch_arxiv_papers(query="Retrieval Augmented Generation", max_results=10, download_pdfs=False):
     """

@@ -4,7 +4,10 @@ import { readFile } from "node:fs/promises";
 // Load the browser ES module without changing the Node package's module type.
 const source = await readFile(new URL("../static/js/utils/helpers.js", import.meta.url), "utf8");
 const helpersUrl = `data:text/javascript;base64,${Buffer.from(source).toString("base64")}`;
-const { formatRelevanceScore } = await import(helpersUrl);
+const { formatRelevanceScore, escapeHTML, safeExternalUrl } = await import(helpersUrl);
+assert.equal(escapeHTML('<img src=x onerror="alert(1)">'), '&lt;img src=x onerror=&quot;alert(1)&quot;&gt;');
+assert.equal(safeExternalUrl("javascript:alert(1)"), "#");
+assert.equal(safeExternalUrl("data:text/html,attack"), "#");
 
 assert.equal(formatRelevanceScore({ relevance_score: 0.9 }), "Relevance: 0.900");
 assert.equal(formatRelevanceScore({ relevance_score: 0 }), "Relevance: 0.000");
@@ -26,11 +29,12 @@ const container = { innerHTML: "", cards: [], appendChild(card) { this.cards.pus
 const panel = new RagSources();
 panel.querySelector = () => container;
 panel.setSources([
-    { index: 1, title: "Local paper", relevance_score: 0.9 },
+    { index: 1, title: '<img onerror="attack">', authors: '<script>attack</script>', pdf_url: "javascript:attack()", relevance_score: 0.9 },
     { index: 2, title: "Live paper", relevance_score: null, is_live_mcp: true },
     { index: 3, title: "Legacy paper", confidence: 0.95, distance: 0.05 },
 ]);
 assert.match(container.cards[0].innerHTML, /Relevance: 0\.900/);
+assert.doesNotMatch(container.cards[0].innerHTML, /<img|<script>|javascript:/);
 assert.match(container.cards[1].innerHTML, /Live source · unscored/);
 assert.match(container.cards[2].innerHTML, /Relevance not scored/);
 assert.doesNotMatch(container.cards.map(card => card.innerHTML).join(""), /95%|NaN|Similarity:/);

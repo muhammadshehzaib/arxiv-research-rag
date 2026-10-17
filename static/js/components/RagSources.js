@@ -1,4 +1,4 @@
-import { formatRelevanceScore } from "../utils/helpers.js";
+import { formatRelevanceScore, escapeHTML, safeExternalUrl } from "../utils/helpers.js";
 
 /**
  * Web Component for slide-out Sources panel.
@@ -69,15 +69,15 @@ class RagSources extends HTMLElement {
             const relevanceLabel = formatRelevanceScore(src);
 
             card.innerHTML = `
-                <span class="source-idx">Source [${src.index}]</span>
-                <h4>${src.title}</h4>
-                <div class="source-authors">Authors: ${src.authors}</div>
+                <span class="source-idx">Source [${escapeHTML(src.index)}]</span>
+                <h4>${escapeHTML(src.title)}</h4>
+                <div class="source-authors">Authors: ${escapeHTML(src.authors)}</div>
                 <div class="source-footer">
                     <div class="score-badge" title="Retrieval relevance is not answer confidence.">
                         <i data-lucide="compass" style="width: 13px; height: 13px;"></i>
                         ${relevanceLabel}
                     </div>
-                    <a href="${src.pdf_url}" target="_blank" class="pdf-link">
+                    <a href="${escapeHTML(safeExternalUrl(src.pdf_url))}" target="_blank" rel="noopener noreferrer" class="pdf-link">
                         <i data-lucide="external-link" style="width: 13px; height: 13px;"></i> arXiv PDF
                     </a>
                 </div>

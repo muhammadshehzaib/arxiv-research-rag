@@ -1,7 +1,7 @@
 import os
 import sys
 import json
-import ssl
+import re
 import time
 import urllib.request
 import urllib.parse
@@ -10,11 +10,6 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# Bypass SSL issues if present on Windows
-try:
-    ssl._create_default_https_context = ssl._create_unverified_context
-except AttributeError:
-    pass
 
 import arxiv
 from mcp.server.mcpserver import MCPServer
@@ -165,6 +160,8 @@ def ingest_live_paper_to_rag(paper_id: str) -> str:
         import sqlite3
 
         paper_id = paper_id.strip()
+        if not re.fullmatch(r"(?:\d{4}\.\d{4,5}|[a-z-]+(?:\.[A-Z]{2})?/\d{7})(?:v\d+)?", paper_id):
+            raise ValueError("Invalid arXiv paper ID.")
         client = arxiv.Client()
         search = arxiv.Search(id_list=[paper_id])
         results = list(client.results(search))
@@ -176,7 +173,7 @@ def ingest_live_paper_to_rag(paper_id: str) -> str:
         os.makedirs(pdf_dir, exist_ok=True)
         
         safe_title = "".join(c if c.isalnum() or c in (' ', '_', '-') else '' for c in result.title).strip()
-        filename = f"{paper_id}_{safe_title[:40]}.pdf"
+        filename = f"{paper_id.replace(chr(47), chr(95))}_{safe_title[:40]}.pdf"
         filepath = os.path.join(pdf_dir, filename)
         
         if not os.path.exists(filepath):

@@ -10,7 +10,7 @@ services:
       RAG_SPARSE_ONLY: "0"
     restart: unless-stopped
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     volumes:
       - ./data:/app/data
       - model_cache:/root/.cache

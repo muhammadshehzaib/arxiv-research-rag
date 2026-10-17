@@ -1,3 +1,4 @@
+import { escapeHTML } from "../utils/helpers.js";
 import { fetchLatestEval, fetchEvalHistory, runEval } from "../services/api.js";
 import { showToast } from "../utils/helpers.js";
 
@@ -59,7 +60,7 @@ class RagEvaluation extends HTMLElement {
             container.innerHTML = `
                 <div class="empty-state">
                     <i data-lucide="alert-triangle" style="color: #ef4444;"></i>
-                    <p>Failed to load evaluation data: ${err.message}</p>
+                    <p>Failed to load evaluation data: ${escapeHTML(err.message)}</p>
                 </div>
             `;
             if (window.lucide) window.lucide.createIcons();
@@ -145,7 +146,7 @@ class RagEvaluation extends HTMLElement {
                     <div class="eval-case-header" onclick="this.parentElement.classList.toggle('expanded')">
                         <div class="eval-case-title">
                             <span class="case-number">Test Case #${idx+1}</span>
-                            <h4>${item.question}</h4>
+                            <h4>${escapeHTML(item.question)}</h4>
                         </div>
                         <div class="eval-case-badges">
                             <span class="eval-badge ${this.getScoreClass(item.faithfulness)}">Faithfulness: ${this.formatScore(item.faithfulness, 2)}</span>
@@ -158,11 +159,11 @@ class RagEvaluation extends HTMLElement {
                     <div class="eval-case-body">
                         <div class="eval-body-section">
                             <h5><i data-lucide="file-check" class="section-icon text-green"></i> RAG Generated Answer</h5>
-                            <div class="eval-text-block generated-answer">${item.answer}</div>
+                            <div class="eval-text-block generated-answer">${escapeHTML(item.answer)}</div>
                         </div>
                         <div class="eval-body-section">
                             <h5><i data-lucide="bookmark" class="section-icon text-primary"></i> Ground Truth Reference</h5>
-                            <div class="eval-text-block ground-truth">${item.ground_truth}</div>
+                            <div class="eval-text-block ground-truth">${escapeHTML(item.ground_truth)}</div>
                         </div>
                     </div>
                 </div>

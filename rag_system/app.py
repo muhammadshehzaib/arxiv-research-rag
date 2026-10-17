@@ -7,8 +7,9 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, StreamingResponse
-from pydantic import BaseModel
-from typing import Optional
+from pydantic import BaseModel, Field, field_validator
+from typing import Optional, Literal
+from rag_system.security import guard_api
 
 # Import RAG pipeline from query_rag
 from rag_system.query_rag import init_services, query_rag
@@ -16,14 +17,15 @@ from rag_system.utils import to_jsonable
 from rag_system.query_policy import QUERY_TIMEOUT_SECONDS, quick_reply
 app = FastAPI(title="arXiv Research RAG Web UI")
 
-# CORS Setup to allow connections from any client
+# Same-origin UI needs no CORS. Additional browser origins must be explicit.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=[origin.strip() for origin in os.getenv("RAG_ALLOWED_ORIGINS", "").split(",") if origin.strip()],
+    allow_credentials=False,
+    allow_methods=["GET", "POST"],
+    allow_headers=["Authorization", "Content-Type", "X-Request-ID"],
 )
+app.middleware("http")(guard_api)
 
 # Global database collection and BM25 search reference
 collection = None
@@ -56,14 +58,29 @@ def startup_event():
         except Exception as e:
             print(f"❌ Failed to initialize BM25 sparse search index: {e}")
 
+class ChatMessage(BaseModel):
+    role: Literal["user", "human", "assistant", "ai", "model"]
+    content: str = Field(max_length=4000)
+
+
 class QueryRequest(BaseModel):
-    query: str
-    paper_id: Optional[str] = None
-    published_after: Optional[str] = None
-    min_pages: Optional[int] = None
-    num_results: Optional[int] = 3
-    chat_history: Optional[list] = None
+    query: str = Field(min_length=1, max_length=4000)
+    paper_id: Optional[str] = Field(default=None, max_length=80)
+    published_after: Optional[str] = Field(default=None, pattern=r"^\d{4}-\d{2}-\d{2}$")
+    min_pages: Optional[int] = Field(default=None, ge=1, le=10000)
+    num_results: int = Field(default=3, ge=1, le=10)
+    chat_history: Optional[list[ChatMessage]] = Field(default=None, max_length=12)
     enable_mcp_fallback: Optional[bool] = True
+
+    @field_validator("query")
+    @classmethod
+    def nonblank_query(cls, value):
+        if not value.strip():
+            raise ValueError("Question cannot be blank.")
+        return value
+
+    def history_dicts(self):
+        return [message.model_dump() for message in self.chat_history] if self.chat_history else None
 
 @app.get("/api/papers")
 def get_papers():
@@ -74,7 +91,7 @@ def get_papers():
         with open(metadata_path, "r", encoding="utf-8") as f:
             return json.load(f)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="The request failed. Check server logs.")
 
 @app.get("/api/stats")
 def get_stats():
@@ -118,7 +135,7 @@ async def post_query(req: QueryRequest):
         except asyncio.TimeoutError:
             raise HTTPException(status_code=504, detail="RAG initialization took too long. Please try again.")
         except Exception as e:
-            raise HTTPException(status_code=500, detail=f"RAG services not initialized: {e}")
+            raise HTTPException(status_code=500, detail="Research services are unavailable.")
 
     if query_slots.locked():
         raise HTTPException(status_code=503, detail="Research service is busy. Please try again shortly.")
@@ -133,7 +150,7 @@ async def post_query(req: QueryRequest):
             min_pages=req.min_pages,
             bm25=bm25,
             bm25_chunks=bm25_chunks,
-            chat_history=req.chat_history,
+            chat_history=req.history_dicts(),
             enable_mcp_fallback=req.enable_mcp_fallback if req.enable_mcp_fallback is not None else True,
             deadline=deadline,
         )
@@ -148,7 +165,7 @@ async def post_query(req: QueryRequest):
     except Exception as e:
         if isinstance(e, HTTPException):
             raise
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="The request failed. Check server logs.")
     finally:
         print(f"[RAG timing] request_total: {(time.monotonic() - request_started) * 1000:.0f} ms", flush=True)
 
@@ -208,7 +225,7 @@ async def stream_query(req: QueryRequest):
             min_pages=req.min_pages,
             bm25=bm25,
             bm25_chunks=bm25_chunks,
-            chat_history=req.chat_history,
+            chat_history=req.history_dicts(),
             enable_mcp_fallback=req.enable_mcp_fallback if req.enable_mcp_fallback is not None else True,
             deadline=deadline,
             progress=progress,
@@ -240,7 +257,7 @@ def get_eval_latest():
         with open(results_path, "r", encoding="utf-8") as f:
             return to_jsonable(verified_evaluation(json.load(f)))
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="The request failed. Check server logs.")
 
 @app.get("/api/eval/history")
 def get_eval_history():
@@ -251,7 +268,7 @@ def get_eval_history():
         with open(history_path, "r", encoding="utf-8") as f:
             return to_jsonable([verified_evaluation(run) for run in json.load(f)])
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="The request failed. Check server logs.")
 
 def verified_evaluation(run):
     """Old placeholder-based evaluations are not valid baselines."""
@@ -274,7 +291,7 @@ def post_eval_run():
             raise HTTPException(status_code=500, detail="Evaluation failed to run. Check server logs.")
         return to_jsonable(results)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="The request failed. Check server logs.")
 
 @app.get("/api/graph/stats")
 def get_graph_stats():

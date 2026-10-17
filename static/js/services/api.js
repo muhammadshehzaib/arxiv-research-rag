@@ -1,3 +1,40 @@
+let accessToken = "";
+let pendingLogin = null;
+
+function requestAccessToken() {
+    if (pendingLogin) return pendingLogin;
+    pendingLogin = new Promise((resolve, reject) => {
+        const dialog = document.createElement("dialog");
+        dialog.innerHTML = `<form><h3>API access</h3><p>Enter the access token configured on your server.</p>
+            <input type="password" name="token" aria-label="API access token" autocomplete="off" required>
+            <button type="submit">Connect</button><button type="button" id="cancel-auth">Cancel</button></form>`;
+        document.body.appendChild(dialog);
+        const close = () => { dialog.remove(); pendingLogin = null; };
+        dialog.querySelector("form").onsubmit = event => {
+            event.preventDefault();
+            const token = dialog.querySelector("input").value;
+            close(); resolve(token);
+        };
+        const cancel = event => { event.preventDefault(); close(); reject(new Error("Authentication cancelled.")); };
+        dialog.querySelector("#cancel-auth").onclick = cancel;
+        dialog.oncancel = cancel;
+        dialog.showModal();
+    });
+    return pendingLogin;
+}
+
+async function apiFetch(url, options = {}) {
+    const headers = new Headers(options.headers || {});
+    if (accessToken) headers.set("Authorization", `Bearer ${accessToken}`);
+    let response = await fetch(url, { ...options, headers });
+    if (response.status === 401) {
+        accessToken = await requestAccessToken();
+        headers.set("Authorization", `Bearer ${accessToken}`);
+        response = await fetch(url, { ...options, headers });
+    }
+    return response;
+}
+
 /**
  * API services for the arXiv RAG application.
  */
@@ -8,7 +45,7 @@
  */
 export async function fetchPapers() {
     console.log("📡 API: Fetching research papers corpus...");
-    const response = await fetch("/api/papers");
+    const response = await apiFetch("/api/papers");
     if (!response.ok) {
         console.error("❌ API: Failed to fetch papers list");
         throw new Error("Failed to fetch papers list");
@@ -24,7 +61,7 @@ export async function fetchPapers() {
  */
 export async function fetchStats() {
     console.log("📡 API: Fetching database statistics...");
-    const response = await fetch("/api/stats");
+    const response = await apiFetch("/api/stats");
     if (!response.ok) {
         console.error("❌ API: Failed to fetch database stats");
         throw new Error("Failed to fetch database stats");
@@ -41,7 +78,7 @@ export async function fetchStats() {
  */
 export async function queryRAG(queryParams, onProgress = () => {}) {
     console.log("📡 API: Submitting RAG query:", queryParams);
-    const response = await fetch("/api/query/stream", {
+    const response = await apiFetch("/api/query/stream", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(queryParams)
@@ -97,7 +134,7 @@ export async function queryRAG(queryParams, onProgress = () => {}) {
  */
 export async function fetchLatestEval() {
     console.log("📡 API: Requesting latest evaluation report...");
-    const response = await fetch("/api/eval/latest");
+    const response = await apiFetch("/api/eval/latest");
     if (!response.ok) {
         console.error("❌ API: Failed to fetch latest evaluation results");
         throw new Error("Failed to fetch latest evaluation results");
@@ -113,7 +150,7 @@ export async function fetchLatestEval() {
  */
 export async function fetchEvalHistory() {
     console.log("📡 API: Requesting evaluation history timeline...");
-    const response = await fetch("/api/eval/history");
+    const response = await apiFetch("/api/eval/history");
     if (!response.ok) {
         console.error("❌ API: Failed to fetch evaluation history");
         throw new Error("Failed to fetch evaluation history");
@@ -129,7 +166,7 @@ export async function fetchEvalHistory() {
  */
 export async function runEval() {
     console.log("📡 API: Triggering live RAG Triad Evaluation Suite (approx 20-30s)...");
-    const response = await fetch("/api/eval/run", {
+    const response = await apiFetch("/api/eval/run", {
         method: "POST",
         headers: { "Content-Type": "application/json" }
     });

@@ -113,6 +113,8 @@ To inspect startup or query errors, run `docker compose logs -f web`. Press Ctrl
 
 ---
 
+For hosted access, set a strong `RAG_API_TOKEN` and `RAG_AUTH_MODE=token` in `.env`, serve behind HTTPS, and configure explicit `RAG_ALLOWED_ORIGINS` only if another browser origin needs access. The UI asks for the token in a password field and keeps it only in memory. Without a token, API access is limited to a local hostname and private/loopback client; Compose binds only to `127.0.0.1`. The health endpoint remains public. Request bodies are capped at 64 KiB, questions at 4,000 characters, history at 12 messages, and results at 10. Rate limits are per client **per server process**; a multi-worker deployment also needs a shared limit at its gateway. TLS verification is enabled; use trusted CA configuration to resolve certificate errors.
+
 ## Workflow Details
 
 1. **Download Phase**: The downloaders query the arXiv API, fetch matching papers, save their metadata to `data/papers_metadata.json`, and download the PDFs to `data/papers/`.
@@ -122,6 +124,7 @@ To inspect startup or query errors, run `docker compose logs -f web`. Press Ctrl
 
 ## Change Log & Execution History
 
+- [2026-10-18] Added hosted bearer authentication, local-only defaults, per-client rate/body/input limits, explicit CORS, safe source/evaluation rendering, localhost Docker binding, and restored verified TLS downloads.
 - [2026-10-18] Unified live and batch parent/child chunking, persisted real parents and canonical records, made live indexing retryable across both stores, and refreshed parent lookup when the registry changes.
 - [2026-10-18] Made evaluations report query/judge failures explicitly, use null for unavailable metrics, score empty-context recall as zero, bypass cache/live retrieval, and support held-out datasets alongside a 15-case smoke suite.
 - [2026-10-18] Added cache TTL, bounded LRU retention, corpus/configuration invalidation, process/thread locking, atomic persistence, and concurrent-writer regression tests.
