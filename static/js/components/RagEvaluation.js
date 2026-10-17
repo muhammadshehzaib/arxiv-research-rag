@@ -74,7 +74,7 @@ class RagEvaluation extends HTMLElement {
                     <i data-lucide="gauge"></i>
                 </div>
                 <h2>Establish Your Quantitative Baseline</h2>
-                <p>Verify if modifications to chunking strategies, prompt templates, or retrieval architectures improve or regress system accuracy. Running this suite will assess the RAG pipeline on a standardized 5-question synthetic test set using <strong>Gemini</strong> LLM-as-a-judge.</p>
+                <p>Verify if modifications to chunking strategies, prompt templates, or retrieval architectures improve or regress system accuracy. Running this suite will assess the RAG pipeline on a configurable research test set (15 built-in smoke cases) using <strong>Gemini</strong> LLM-as-a-judge.</p>
                 
                 <div class="triad-explain-grid">
                     <div class="triad-explain-card">
@@ -126,7 +126,7 @@ class RagEvaluation extends HTMLElement {
                     <div class="history-item">
                         <div class="history-meta">
                             <span class="history-date">${date}</span>
-                            <span class="history-score">Score: <strong>${h.average_score.toFixed(3)}</strong></span>
+                            <span class="history-score">Score: <strong>${this.formatScore(h.average_score, 3)}</strong></span>
                         </div>
                         <div class="history-bar-row">
                             <div class="history-bar-fill" style="width: ${h.average_score * 100}%"></div>
@@ -148,10 +148,10 @@ class RagEvaluation extends HTMLElement {
                             <h4>${item.question}</h4>
                         </div>
                         <div class="eval-case-badges">
-                            <span class="eval-badge ${this.getScoreClass(item.faithfulness)}">Faithfulness: ${item.faithfulness.toFixed(2)}</span>
-                            <span class="eval-badge ${this.getScoreClass(item.answer_relevancy)}">Relevance: ${item.answer_relevancy.toFixed(2)}</span>
-                            <span class="eval-badge ${this.getScoreClass(item.context_precision)}">Precision: ${item.context_precision.toFixed(2)}</span>
-                            <span class="eval-badge ${this.getScoreClass(item.context_recall)}">Recall: ${item.context_recall.toFixed(2)}</span>
+                            <span class="eval-badge ${this.getScoreClass(item.faithfulness)}">Faithfulness: ${this.formatScore(item.faithfulness, 2)}</span>
+                            <span class="eval-badge ${this.getScoreClass(item.answer_relevancy)}">Relevance: ${this.formatScore(item.answer_relevancy, 2)}</span>
+                            <span class="eval-badge ${this.getScoreClass(item.context_precision)}">Precision: ${this.formatScore(item.context_precision, 2)}</span>
+                            <span class="eval-badge ${this.getScoreClass(item.context_recall)}">Recall: ${this.formatScore(item.context_recall, 2)}</span>
                             <i data-lucide="chevron-down" class="expand-icon"></i>
                         </div>
                     </div>
@@ -170,18 +170,22 @@ class RagEvaluation extends HTMLElement {
         }).join("");
 
         container.innerHTML = `
+            <p class="evaluation-status">${latest.status === "legacy_unverified"
+                ? "This saved run used obsolete scoring and is unverified. Run evaluation again."
+                : latest.status === "incomplete" ? "Incomplete evaluation: some requests or judges failed. Overall score is unavailable."
+                : "Smoke-suite results are diagnostic; use a representative held-out dataset to assess quality."}</p>
             <div class="dashboard-grid">
                 <!-- Summary Metrics -->
                 <div class="summary-card-container">
                     <div class="metric-card main-score">
                         <div class="metric-score-label">Overall RAG Score</div>
-                        <div class="metric-big-score">${latest.average_score.toFixed(3)}</div>
+                        <div class="metric-big-score">${this.formatScore(latest.average_score, 3)}</div>
                         <div class="score-footer-text">Average of RAG Triad Metrics</div>
                     </div>
                     <div class="metric-card">
                         <div class="metric-title-row">
                             <span>Faithfulness</span>
-                            <span class="metric-score-val ${this.getScoreClass(latest.faithfulness)}">${latest.faithfulness.toFixed(2)}</span>
+                            <span class="metric-score-val ${this.getScoreClass(latest.faithfulness)}">${this.formatScore(latest.faithfulness, 2)}</span>
                         </div>
                         <div class="progress-bar-row">
                             <div class="progress-bar-fill bg-purple" style="width: ${latest.faithfulness * 100}%"></div>
@@ -191,7 +195,7 @@ class RagEvaluation extends HTMLElement {
                     <div class="metric-card">
                         <div class="metric-title-row">
                             <span>Answer Relevance</span>
-                            <span class="metric-score-val ${this.getScoreClass(latest.answer_relevancy)}">${latest.answer_relevancy.toFixed(2)}</span>
+                            <span class="metric-score-val ${this.getScoreClass(latest.answer_relevancy)}">${this.formatScore(latest.answer_relevancy, 2)}</span>
                         </div>
                         <div class="progress-bar-row">
                             <div class="progress-bar-fill bg-cyan" style="width: ${latest.answer_relevancy * 100}%"></div>
@@ -201,7 +205,7 @@ class RagEvaluation extends HTMLElement {
                     <div class="metric-card">
                         <div class="metric-title-row">
                             <span>Context Precision</span>
-                            <span class="metric-score-val ${this.getScoreClass(latest.context_precision)}">${latest.context_precision.toFixed(2)}</span>
+                            <span class="metric-score-val ${this.getScoreClass(latest.context_precision)}">${this.formatScore(latest.context_precision, 2)}</span>
                         </div>
                         <div class="progress-bar-row">
                             <div class="progress-bar-fill bg-green" style="width: ${latest.context_precision * 100}%"></div>
@@ -211,7 +215,7 @@ class RagEvaluation extends HTMLElement {
                     <div class="metric-card">
                         <div class="metric-title-row">
                             <span>Context Recall</span>
-                            <span class="metric-score-val ${this.getScoreClass(latest.context_recall)}">${latest.context_recall.toFixed(2)}</span>
+                            <span class="metric-score-val ${this.getScoreClass(latest.context_recall)}">${this.formatScore(latest.context_recall, 2)}</span>
                         </div>
                         <div class="progress-bar-row">
                             <div class="progress-bar-fill bg-indigo" style="width: ${latest.context_recall * 100}%"></div>
@@ -250,6 +254,10 @@ class RagEvaluation extends HTMLElement {
         `;
 
         if (window.lucide) window.lucide.createIcons();
+    }
+
+    formatScore(score, digits = 2) {
+        return typeof score === "number" && Number.isFinite(score) ? score.toFixed(digits) : "N/A";
     }
 
     getScoreClass(score) {

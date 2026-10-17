@@ -586,7 +586,7 @@ Answer:"""
         print(f"⚠️ Failed during live MCP fallback: {e}")
         return None, None
 
-def query_rag(collection, query_text, num_results=3, paper_id=None, published_after=None, min_pages=None, bm25=None, bm25_chunks=None, chat_history=None, enable_mcp_fallback=True, deadline=None, progress=None):
+def query_rag(collection, query_text, num_results=3, paper_id=None, published_after=None, min_pages=None, bm25=None, bm25_chunks=None, chat_history=None, enable_mcp_fallback=True, deadline=None, progress=None, use_cache=True):
     # 1. Start timer immediately at the entry point for 100% honest latency accounting
     start_time = time.time()
     set_deadline(deadline if deadline is not None else time.monotonic() + QUERY_TIMEOUT_SECONDS)
@@ -610,7 +610,7 @@ def query_rag(collection, query_text, num_results=3, paper_id=None, published_af
     cache = get_semantic_cache()
     # A response generated with history is conversation-specific. Do not reuse or
     # publish it through the shared semantic cache, even if rephrasing fails.
-    cache_allowed = not bool(chat_history)
+    cache_allowed = use_cache and not bool(chat_history)
     # Compute query embedding once upfront to avoid duplicate API calls
     query_vector = None
     if EMBEDDING_PROVIDER != "local":

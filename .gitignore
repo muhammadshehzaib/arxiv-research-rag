@@ -24,6 +24,7 @@ data/semantic_cache.json.*
 data/knowledge_graph.json
 data/bm25_fts.db*
 data/paper_parents.json
+data/evaluation.lock
 
 # Logs & Temporary Files
 *.log

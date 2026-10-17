@@ -238,7 +238,7 @@ def get_eval_latest():
         return {"status": "no_runs_yet", "message": "No evaluation has been run yet."}
     try:
         with open(results_path, "r", encoding="utf-8") as f:
-            return to_jsonable(json.load(f))
+            return to_jsonable(verified_evaluation(json.load(f)))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -249,9 +249,21 @@ def get_eval_history():
         return []
     try:
         with open(history_path, "r", encoding="utf-8") as f:
-            return to_jsonable(json.load(f))
+            return to_jsonable([verified_evaluation(run) for run in json.load(f)])
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+def verified_evaluation(run):
+    """Old placeholder-based evaluations are not valid baselines."""
+    if run.get("schema_version") == 2:
+        return run
+    result = dict(run, status="legacy_unverified")
+    for key in ("faithfulness", "answer_relevancy", "context_precision", "context_recall", "average_score"):
+        result[key] = None
+    result["details"] = [dict(case, faithfulness=None, answer_relevancy=None,
+                             context_precision=None, context_recall=None) for case in run.get("details", [])]
+    return result
+
 
 @app.post("/api/eval/run")
 def post_eval_run():
