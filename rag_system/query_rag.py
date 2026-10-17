@@ -14,6 +14,7 @@ from rank_bm25 import BM25Okapi
 from rag_system.semantic_cache import get_semantic_cache
 from rag_system.knowledge_graph import get_knowledge_graph
 from rag_system.relevance import finite_raw_score, normalize_relevance_score, get_relevance_threshold
+from rag_system.storage import corpus_version
 from rag_system.utils import setup_windows_encoding, date_to_int, tokenize_text, get_corpus_size
 from rag_system.query_policy import (
     QUERY_TIMEOUT_SECONDS, MCP_SEARCH_TIMEOUT_SECONDS, GEMINI_TIMEOUT_SECONDS,
@@ -594,6 +595,7 @@ def query_rag(collection, query_text, num_results=3, paper_id=None, published_af
         print("[RAG timing] quick_reply: 0 ms", flush=True)
         return reply, []
     original_user_query = query_text
+    query_corpus_version = corpus_version()
     live_fallback_allowed = enable_mcp_fallback and allows_live_research(query_text, paper_id=paper_id)
     if enable_mcp_fallback and not live_fallback_allowed:
         print("[RAG] Live fallback skipped: query has no research signal", flush=True)
@@ -1092,7 +1094,8 @@ Answer:"""
         
         # Store in Semantic Cache for future identical / paraphrased queries
         if cache_allowed:
-            cache.store(query_text, generated_answer, sources, query_embedding=query_vector, filters=active_filters)
+            cache.store(query_text, generated_answer, sources, query_embedding=query_vector,
+                        filters=active_filters, corpus_revision=query_corpus_version)
         elapsed_ms = (time.time() - start_time) * 1000
         print(f"⏱️ Full Pipeline Latency: {elapsed_ms:.1f}ms (Response generated; shared cache {'enabled' if cache_allowed else 'bypassed'})")
         

@@ -122,6 +122,7 @@ To inspect startup or query errors, run `docker compose logs -f web`. Press Ctrl
 
 ## Change Log & Execution History
 
+- [2026-10-18] Added cache TTL, bounded LRU retention, corpus/configuration invalidation, process/thread locking, atomic persistence, and concurrent-writer regression tests.
 - [2026-10-18] Isolated conversational answers from the shared semantic cache: history-bearing requests always resolve context and never read or write shared cached answers.
 - [2026-10-18] Fixed the packaged FTS builder import and made vector/keyword indexing failures propagate to a nonzero ingestion exit status so failed batches can be retried.
 - [2026-10-18] Fixed the evaluation button's packaged evaluator import and verified its HTTP success and failure responses without external API calls.

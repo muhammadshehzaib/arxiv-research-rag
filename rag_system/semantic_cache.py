@@ -1,30 +1,43 @@
-import os
+"""Bounded, versioned semantic answer cache with transactional file updates."""
 import json
+import os
+import threading
 import time
+from datetime import datetime, timezone
+from pathlib import Path
+
 import numpy as np
-from datetime import datetime
 from dotenv import load_dotenv
+from filelock import FileLock
+
+from rag_system.relevance import SCORING_VERSION
+from rag_system.storage import atomic_write_json, corpus_version
+from rag_system.utils import to_jsonable
 
 load_dotenv()
-
-from rag_system.utils import to_jsonable
-from rag_system.relevance import SCORING_VERSION
-
 CACHE_FILE_PATH = os.path.join("data", "semantic_cache.json")
 DEFAULT_SIMILARITY_THRESHOLD = float(os.getenv("SEMANTIC_CACHE_THRESHOLD", "0.92"))
 EMBEDDING_PROVIDER = os.getenv("EMBEDDING_PROVIDER", "gemini")
 
+
 class SemanticCache:
-    """
-    On-device Semantic Cache for RAG queries.
-    Matches queries by vector cosine similarity to return pre-computed answers in sub-50ms.
-    """
-    def __init__(self, cache_file=CACHE_FILE_PATH, similarity_threshold=DEFAULT_SIMILARITY_THRESHOLD):
-        self.cache_file = cache_file
+    def __init__(self, cache_file=CACHE_FILE_PATH, similarity_threshold=DEFAULT_SIMILARITY_THRESHOLD,
+                 ttl_seconds=None, max_entries=None, version_fn=None, clock=None):
+        self.cache_file = str(cache_file)
         self.similarity_threshold = similarity_threshold
+        self.ttl_seconds = float(ttl_seconds if ttl_seconds is not None else os.getenv("SEMANTIC_CACHE_TTL_SECONDS", "3600"))
+        self.max_entries = int(max_entries if max_entries is not None else os.getenv("SEMANTIC_CACHE_MAX_ENTRIES", "500"))
+        if self.ttl_seconds <= 0 or self.max_entries < 1:
+            raise ValueError("Cache TTL and maximum entries must be positive.")
+        self.version_fn = version_fn or corpus_version
+        self.clock = clock or time.time
         self.entries = []
         self._embedding_function = None
-        self._load_cache()
+        self._thread_lock = threading.RLock()
+        Path(self.cache_file).parent.mkdir(parents=True, exist_ok=True)
+        self._file_lock = FileLock(self.cache_file + ".lock", timeout=5)
+        with self._thread_lock, self._file_lock:
+            self._load_cache()
 
     def _get_embedding_function(self):
         """Lazy-loads the embedding function for generating query vectors."""
@@ -77,149 +90,113 @@ class SemanticCache:
         return None
 
     def _load_cache(self):
-        """Loads cached queries and vectors from disk."""
-        if not os.path.exists(self.cache_file):
-            self.entries = []
-            return
-
+        # Caller holds both locks. Reload before every transaction to merge writers.
+        self.entries = []
         try:
-            with open(self.cache_file, "r", encoding="utf-8") as f:
-                raw_data = json.load(f)
-            self.entries = []
-            for item in raw_data:
-                if item.get("scoring_version") != SCORING_VERSION:
+            raw = json.loads(Path(self.cache_file).read_text(encoding="utf-8"))
+        except (FileNotFoundError, json.JSONDecodeError):
+            return
+        version, now = self.version_fn(), self.clock()
+        for item in raw if isinstance(raw, list) else []:
+            try:
+                if (item.get("scoring_version") != SCORING_VERSION
+                        or item.get("corpus_version") != version
+                        or not 0 <= now - item["created_at_epoch"] < self.ttl_seconds):
                     continue
-                self.entries.append({
-                    "scoring_version": SCORING_VERSION,
-                    "query_text": item["query_text"],
-                    "embedding": np.array(item["embedding"], dtype=np.float32),
-                    "answer": item["answer"],
-                    "sources": item.get("sources", []),
-                    "filters": item.get("filters", {}),
-                    "created_at": item.get("created_at", ""),
-                    "hit_count": item.get("hit_count", 0)
-                })
-        except Exception as e:
-            print(f"⚠️ Error loading semantic cache from {self.cache_file}: {e}")
-            self.entries = []
+                entry = dict(item, embedding=np.asarray(item["embedding"], dtype=np.float32))
+                if entry["embedding"].ndim != 1 or not np.isfinite(entry["embedding"]).all():
+                    continue
+                self.entries.append(entry)
+            except (KeyError, TypeError, ValueError):
+                continue
+        self.entries.sort(key=lambda item: item.get("last_access", item["created_at_epoch"]))
+        self.entries = self.entries[-self.max_entries:]
 
     def _save_cache(self):
-        """Persists the cache to disk."""
-        os.makedirs(os.path.dirname(self.cache_file), exist_ok=True)
-        try:
-            serializable = []
-            for item in self.entries:
-                emb = item["embedding"].tolist() if hasattr(item["embedding"], "tolist") else list(item["embedding"])
-                serializable.append({
-                    "scoring_version": SCORING_VERSION,
-                    "query_text": item["query_text"],
-                    "embedding": emb,
-                    "answer": item["answer"],
-                    "sources": to_jsonable(item["sources"]),
-                    "filters": item.get("filters", {}),
-                    "created_at": item.get("created_at", ""),
-                    "hit_count": item.get("hit_count", 0)
-                })
-            with open(self.cache_file, "w", encoding="utf-8") as f:
-                json.dump(serializable, f, indent=2, ensure_ascii=False)
-        except Exception as e:
-            print(f"⚠️ Error saving semantic cache to {self.cache_file}: {e}")
+        atomic_write_json(self.cache_file, to_jsonable(self.entries))
 
     def lookup(self, query_text, query_embedding=None, filters=None):
-        """
-        Looks up a query in the semantic cache.
-        Returns:
-            (is_hit: bool, answer: str, sources: list, score: float, matched_query: str)
-        """
-        if not self.entries:
-            return False, None, [], 0.0, None
+        miss = (False, None, [], 0.0, None)
+        with self._thread_lock, self._file_lock:
+            self._load_cache()
+            if not self.entries:
+                self._save_cache()
+                return miss
+        vector = query_embedding if query_embedding is not None else self.get_embedding(query_text)
+        if vector is None:
+            return miss
+        vector = np.asarray(vector, dtype=np.float32)
+        if vector.ndim != 1 or not np.isfinite(vector).all() or np.linalg.norm(vector) == 0:
+            return miss
+        with self._thread_lock, self._file_lock:
+            self._load_cache()
+            best, best_score = None, -1.0
+            for entry in self.entries:
+                other = entry["embedding"]
+                if entry.get("filters", {}) != (filters or {}) or other.shape != vector.shape:
+                    continue
+                norm = np.linalg.norm(other) * np.linalg.norm(vector)
+                if norm == 0:
+                    continue
+                score = float(np.dot(vector, other) / norm)
+                if score > best_score:
+                    best, best_score = entry, score
+            if best is not None and best_score >= self.similarity_threshold:
+                best["hit_count"] = best.get("hit_count", 0) + 1
+                best["last_access"] = self.clock()
+                self._save_cache()
+                return True, best["answer"], best["sources"], best_score, best["query_text"]
+            self._save_cache()  # Persist pruning of expired/obsolete entries.
+            return False, None, [], max(0.0, best_score), None
 
-        if query_embedding is None:
-            query_embedding = self.get_embedding(query_text)
-            
-        if query_embedding is None:
-            return False, None, [], 0.0, None
-
-        q_vec = np.array(query_embedding, dtype=np.float32)
-        q_norm = np.linalg.norm(q_vec)
-        if q_norm == 0:
-            return False, None, [], 0.0, None
-
-        best_score = -1.0
-        best_entry = None
-        current_filters = filters or {}
-
-        # Vectorized similarity comparison across all matching filter candidates
-        for entry in self.entries:
-            # Check filter match (queries with different date/paper filters must not collide)
-            entry_filters = entry.get("filters", {})
-            if current_filters != entry_filters:
-                continue
-
-            e_vec = entry["embedding"]
-            e_norm = np.linalg.norm(e_vec)
-            if e_norm == 0:
-                continue
-
-            # Cosine similarity: (A . B) / (||A|| * ||B||)
-            sim = float(np.dot(q_vec, e_vec) / (q_norm * e_norm))
-            if sim > best_score:
-                best_score = sim
-                best_entry = entry
-
-        if best_entry and best_score >= self.similarity_threshold:
-            best_entry["hit_count"] += 1
-            self._save_cache()
-            return True, best_entry["answer"], best_entry["sources"], best_score, best_entry["query_text"]
-
-        return False, None, [], max(best_score, 0.0), None
-
-    def store(self, query_text, answer, sources, query_embedding=None, filters=None):
-        """Stores a new query-response pair into the semantic cache."""
-        if query_embedding is None:
-            query_embedding = self.get_embedding(query_text)
-
-        if query_embedding is None:
+    def store(self, query_text, answer, sources, query_embedding=None, filters=None, corpus_revision=None):
+        version = corpus_revision if corpus_revision is not None else self.version_fn()
+        vector = query_embedding if query_embedding is not None else self.get_embedding(query_text)
+        if vector is None:
             return False
-
-        q_vec = np.array(query_embedding, dtype=np.float32)
-        entry = {
-            "scoring_version": SCORING_VERSION,
-            "query_text": query_text,
-            "embedding": q_vec,
-            "answer": answer,
-            "sources": sources,
-            "filters": filters or {},
-            "created_at": datetime.now().isoformat(),
-            "hit_count": 0
-        }
-        self.entries.append(entry)
-        self._save_cache()
+        vector = np.asarray(vector, dtype=np.float32)
+        if vector.ndim != 1 or not np.isfinite(vector).all() or np.linalg.norm(vector) == 0:
+            return False
+        with self._thread_lock, self._file_lock:
+            self._load_cache()
+            if version != self.version_fn():
+                return False
+            now = self.clock()
+            self.entries = [entry for entry in self.entries if not (
+                entry["query_text"] == query_text and entry.get("filters", {}) == (filters or {})
+            )]
+            self.entries.append({
+                "scoring_version": SCORING_VERSION, "corpus_version": version,
+                "query_text": query_text, "embedding": vector, "answer": answer,
+                "sources": sources, "filters": filters or {}, "created_at_epoch": now,
+                "created_at": datetime.fromtimestamp(now, timezone.utc).isoformat(),
+                "last_access": now, "hit_count": 0,
+            })
+            self.entries = self.entries[-self.max_entries:]
+            self._save_cache()
         return True
 
     def clear(self):
-        """Clears all cached entries."""
-        self.entries = []
-        if os.path.exists(self.cache_file):
-            try:
-                os.remove(self.cache_file)
-            except Exception:
-                pass
+        with self._thread_lock, self._file_lock:
+            self.entries = []
+            self._save_cache()
 
     def stats(self):
-        """Returns cache statistics."""
-        total_hits = sum(e.get("hit_count", 0) for e in self.entries)
-        return {
-            "total_cached_queries": len(self.entries),
-            "total_hits": total_hits,
-            "threshold": self.similarity_threshold,
-            "cache_file": self.cache_file
-        }
+        with self._thread_lock, self._file_lock:
+            self._load_cache()
+            return {"total_cached_queries": len(self.entries),
+                    "total_hits": sum(entry.get("hit_count", 0) for entry in self.entries),
+                    "threshold": self.similarity_threshold, "ttl_seconds": self.ttl_seconds,
+                    "max_entries": self.max_entries, "cache_file": self.cache_file}
 
-# Global singleton instance
+
 _cache_instance = None
+_cache_lock = threading.Lock()
+
+
 def get_semantic_cache():
     global _cache_instance
-    if _cache_instance is None:
-        _cache_instance = SemanticCache()
-    return _cache_instance
+    with _cache_lock:
+        if _cache_instance is None:
+            _cache_instance = SemanticCache()
+        return _cache_instance
