@@ -1,3 +1,5 @@
+import { formatRelevanceScore } from "../utils/helpers.js";
+
 /**
  * Web Component for slide-out Sources panel.
  */
@@ -64,17 +66,16 @@ class RagSources extends HTMLElement {
             card.className = "source-card";
             card.id = `source-card-${src.index}`;
 
-            // Compute similarity confidence (1 - distance)
-            const confidence = Math.max(0, (1 - src.distance) * 100).toFixed(1);
+            const relevanceLabel = formatRelevanceScore(src);
 
             card.innerHTML = `
                 <span class="source-idx">Source [${src.index}]</span>
                 <h4>${src.title}</h4>
                 <div class="source-authors">Authors: ${src.authors}</div>
                 <div class="source-footer">
-                    <div class="score-badge">
+                    <div class="score-badge" title="Retrieval relevance is not answer confidence.">
                         <i data-lucide="compass" style="width: 13px; height: 13px;"></i>
-                        Similarity: ${confidence}%
+                        ${relevanceLabel}
                     </div>
                     <a href="${src.pdf_url}" target="_blank" class="pdf-link">
                         <i data-lucide="external-link" style="width: 13px; height: 13px;"></i> arXiv PDF

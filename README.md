@@ -87,9 +87,13 @@ Run these commands from the project root.
 ### 3. Model Context Protocol (MCP) Integration
 This repository includes a native **Model Context Protocol (MCP)** implementation:
 * **Academic MCP Server (`rag_system/academic_mcp_server.py`)**: Run with `python -m rag_system.academic_mcp_server` from the project root. It exposes tools (`search_arxiv`, `search_semantic_scholar`, `fetch_paper_by_id`, `search_local_rag`, `ingest_live_paper_to_rag`) over stdio for external AI IDEs (Antigravity, Claude Desktop, Cursor).
-* **Live Paper MCP Fallback (`rag_system/mcp_client.py`)**: Automatically connects to the MCP server whenever local vector retrieval produces insufficient evidence (< 70% confidence) or 0 matching candidates, fetching live papers and generating grounded answers.
+* **Live Paper MCP Fallback (`rag_system/mcp_client.py`)**: Automatically connects to the MCP server for eligible research queries when local retrieval falls below its relevance cutoff or returns no matching candidates, fetching live papers and generating grounded answers. Live papers are shown as unscored.
 
 Start the web app from the project root with `python -m rag_system.app`.
+
+Source `relevance_score` values are retrieval ranking signals on a 0–1 scale, **not probabilities that an answer is correct**. Cohere and FlashRank bounded scores are preserved; Sentence Transformers is explicitly asked for logits and receives one sigmoid transformation. The API no longer returns synthetic `confidence` or `distance` fields; unscored live sources have null `relevance_score`, `rerank_score`, and `rrf_score`. Existing semantic cache entries from the old scoring scheme are ignored.
+
+`REFUSAL_THRESHOLD` remains the global relevance cutoff (default `0.70`). Optional `REFUSAL_THRESHOLD_COHERE`, `REFUSAL_THRESHOLD_SENTENCE_TRANSFORMERS`, and `REFUSAL_THRESHOLD_FLASHRANK` override it for each provider. These defaults are heuristics: rerun `python -m scripts.calibrate_threshold` on representative questions after changing provider, model, or scoring version. Old calibration results used the previous scoring scheme and should not be reused. See the [Sentence Transformers activation documentation](https://sbert.net/docs/package_reference/cross_encoder/model.html) and [Cohere threshold guidance](https://docs.cohere.com/v1/docs/reranking-best-practices).
 
 ---
 
@@ -118,6 +122,7 @@ To inspect startup or query errors, run `docker compose logs -f web`. Press Ctrl
 
 ## Change Log & Execution History
 
+- [2026-10-17] Corrected provider-specific relevance scoring and refusal thresholds, removed fabricated live-source confidence, updated source labels and calibration, invalidated legacy scoring caches, and added regression tests.
 - [2026-10-17] Fixed empty local retrieval to attempt permitted MCP live fallback before returning no results, removed the unreachable fallback branch, and added regression coverage.
 - [2026-10-12] Enabled Chroma dense retrieval alongside SQLite keyword search in Docker, restoring hybrid retrieval with reciprocal rank fusion and reranking.
 - [2026-10-11] Converted NumPy values in streamed chat results to JSON-safe types so completed queries reach the browser instead of ending with a network error.

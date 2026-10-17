@@ -1,12 +1,12 @@
 """
 calibrate_threshold.py
 ======================
-Finds the best REFUSAL_CONFIDENCE_THRESHOLD for YOUR specific dataset by:
+Tunes a retrieval relevance cutoff for the active reranker and YOUR dataset by:
 
   1. Running a set of IN-SCOPE questions (your papers should answer these)
   2. Running a set of OUT-OF-SCOPE questions (your papers cannot answer these)
   3. For each question, capturing the raw reranker score BEFORE any threshold decision
-  4. Sweeping thresholds from 0.40 to 0.95 and measuring accuracy at each step
+  4. Sweeping relevance thresholds from 0.01 to 1.00 and measuring accuracy
   5. Picking the threshold where in-scope questions PASS and out-of-scope questions FAIL
 
 Usage:
@@ -15,7 +15,9 @@ Usage:
 Output:
     - A table showing accuracy at each threshold
     - The recommended threshold printed to console
-    - Optionally auto-updates REFUSAL_THRESHOLD in your .env file
+    - Optionally updates the provider-specific cutoff in your .env file
+
+Scores are relevance signals, not calibrated answer-correctness probabilities.
 """
 
 import os
@@ -37,6 +39,9 @@ load_dotenv()
 # Import the RAG pipeline (needed to get real reranker scores)
 from rag_system.query_rag import init_services, get_bm25_index, get_reranker, get_query_embedding, EMBEDDING_PROVIDER
 from rag_system.utils import tokenize_text
+from rag_system.relevance import (
+    SCORING_VERSION, THRESHOLD_ENV_KEYS, get_relevance_threshold, normalize_relevance_score,
+)
 
 # =============================================================================
 #  TEST QUESTIONS
@@ -83,18 +88,14 @@ OUT_SCOPE_QUESTIONS = [
     "How does the human immune system fight viruses?",
 ]
 
-# Sigmoid helper (same formula used in query_rag.py)
-def sigmoid(x):
-    return 1.0 / (1.0 + np.exp(-x))
-
 # =============================================================================
 #  STEP 1: Get the top reranker score for a query WITHOUT applying any threshold
 # =============================================================================
 
 def get_top_reranker_score(collection, query_text, bm25, bm25_chunks, reranker):
     """
-    Runs the full retrieval + reranking pipeline for a single query and returns
-    the top raw reranker score (before sigmoid conversion).
+    Runs retrieval and reranking for a calibration query and returns
+    the top raw reranker score (before provider-specific normalization).
     Returns None if retrieval finds nothing.
     """
     fetch_results = 30
@@ -187,12 +188,9 @@ def collect_scores(collection, bm25, bm25_chunks, reranker):
     for i, q in enumerate(IN_SCOPE_QUESTIONS, 1):
         print(f"  [{i:02d}/{len(IN_SCOPE_QUESTIONS)}] {q[:65]}")
         raw = get_top_reranker_score(collection, q, bm25, bm25_chunks, reranker)
-        if raw is None:
-            print(f"         -> No results found (treating as raw score = -10)")
-            raw = -10.0
-        conf = sigmoid(raw)
-        print(f"         -> Raw score: {raw:+.4f}  |  Confidence: {conf*100:.1f}%")
-        in_scope_scores.append({"question": q, "raw": raw, "confidence": conf})
+        relevance = normalize_relevance_score(raw, reranker.provider)
+        print(f"         -> Raw score: {raw!r}  |  Relevance: {relevance:.3f}")
+        in_scope_scores.append({"question": q, "raw": raw, "relevance_score": relevance})
 
     print("\n" + "="*70)
     print("  Collecting scores for OUT-OF-SCOPE questions...")
@@ -200,12 +198,9 @@ def collect_scores(collection, bm25, bm25_chunks, reranker):
     for i, q in enumerate(OUT_SCOPE_QUESTIONS, 1):
         print(f"  [{i:02d}/{len(OUT_SCOPE_QUESTIONS)}] {q[:65]}")
         raw = get_top_reranker_score(collection, q, bm25, bm25_chunks, reranker)
-        if raw is None:
-            print(f"         -> No results found (treating as raw score = -10)")
-            raw = -10.0
-        conf = sigmoid(raw)
-        print(f"         -> Raw score: {raw:+.4f}  |  Confidence: {conf*100:.1f}%")
-        out_scope_scores.append({"question": q, "raw": raw, "confidence": conf})
+        relevance = normalize_relevance_score(raw, reranker.provider)
+        print(f"         -> Raw score: {raw!r}  |  Relevance: {relevance:.3f}")
+        out_scope_scores.append({"question": q, "raw": raw, "relevance_score": relevance})
 
     return in_scope_scores, out_scope_scores
 
@@ -215,14 +210,14 @@ def collect_scores(collection, bm25, bm25_chunks, reranker):
 # =============================================================================
 
 def sweep_thresholds(in_scope_scores, out_scope_scores):
-    thresholds = [round(t, 2) for t in np.arange(0.40, 0.96, 0.01)]
+    thresholds = [round(t, 2) for t in np.arange(0.01, 1.01, 0.01)]
 
     results = []
     for t in thresholds:
-        # In-scope questions SHOULD pass (confidence >= threshold)
-        in_correct  = sum(1 for s in in_scope_scores  if s["confidence"] >= t)
-        # Out-scope questions SHOULD fail (confidence < threshold)
-        out_correct = sum(1 for s in out_scope_scores if s["confidence"] <  t)
+        # In-scope questions SHOULD pass the relevance threshold.
+        in_correct  = sum(1 for s in in_scope_scores  if s["relevance_score"] >= t)
+        # Out-of-scope questions SHOULD fall below it.
+        out_correct = sum(1 for s in out_scope_scores if s["relevance_score"] < t)
 
         total_correct = in_correct + out_correct
         total         = len(in_scope_scores) + len(out_scope_scores)
@@ -287,14 +282,14 @@ def print_results_table(sweep_results, in_scope_scores, out_scope_scores):
     print(f"\n  IN-SCOPE questions  (should PASS the threshold)")
     print(f"  " + "-"*70)
     for s in in_scope_scores:
-        status = "PASS    " if s["confidence"] >= best_t else "WRONGLY REFUSED"
-        print(f"  [{status}]  conf={s['confidence']*100:.1f}%  | {s['question'][:55]}")
+        status = "PASS    " if s["relevance_score"] >= best_t else "WRONGLY REFUSED"
+        print(f"  [{status}]  relevance={s['relevance_score']:.3f}  | {s['question'][:55]}")
 
     print(f"\n  OUT-OF-SCOPE questions  (should be REFUSED by the threshold)")
     print(f"  " + "-"*70)
     for s in out_scope_scores:
-        status = "REFUSED " if s["confidence"] < best_t else "WRONGLY ANSWERED"
-        print(f"  [{status}]  conf={s['confidence']*100:.1f}%  | {s['question'][:55]}")
+        status = "REFUSED " if s["relevance_score"] < best_t else "WRONGLY ANSWERED"
+        print(f"  [{status}]  relevance={s['relevance_score']:.3f}  | {s['question'][:55]}")
 
     return best_t
 
@@ -303,7 +298,7 @@ def print_results_table(sweep_results, in_scope_scores, out_scope_scores):
 #  STEP 5: Save results and optionally update .env
 # =============================================================================
 
-def save_calibration_results(sweep_results, in_scope_scores, out_scope_scores, best_threshold):
+def save_calibration_results(sweep_results, in_scope_scores, out_scope_scores, best_threshold, provider):
     os.makedirs("data", exist_ok=True)
 
     # Convert numpy floats to plain Python floats for JSON serialization
@@ -317,6 +312,9 @@ def save_calibration_results(sweep_results, in_scope_scores, out_scope_scores, b
         return obj
 
     output = {
+        "scoring_version": SCORING_VERSION,
+        "reranker_provider": provider,
+        "score_semantics": "retrieval_relevance_not_answer_probability",
         "best_threshold":    float(best_threshold),
         "sweep":             to_serializable(sweep_results),
         "in_scope_scores":   to_serializable(in_scope_scores),
@@ -328,7 +326,8 @@ def save_calibration_results(sweep_results, in_scope_scores, out_scope_scores, b
     print(f"\n  Full calibration results saved to: {path}")
 
 
-def update_env_threshold(best_threshold):
+def update_env_threshold(best_threshold, provider):
+    env_key = THRESHOLD_ENV_KEYS[provider]
     env_path = ".env"
     if not os.path.exists(env_path):
         print(f"  Warning: .env file not found at {env_path}. Skipping auto-update.")
@@ -340,20 +339,20 @@ def update_env_threshold(best_threshold):
     found = False
     new_lines = []
     for line in lines:
-        if line.strip().startswith("REFUSAL_THRESHOLD="):
-            new_lines.append(f"REFUSAL_THRESHOLD={best_threshold:.2f}\n")
+        if line.strip().startswith(f"{env_key}="):
+            new_lines.append(f"{env_key}={best_threshold:.2f}\n")
             found = True
         else:
             new_lines.append(line)
 
     # If key does not exist yet, append it
     if not found:
-        new_lines.append(f"\nREFUSAL_THRESHOLD={best_threshold:.2f}\n")
+        new_lines.append(f"\n{env_key}={best_threshold:.2f}\n")
 
     with open(env_path, "w", encoding="utf-8") as f:
         f.writelines(new_lines)
 
-    print(f"  Updated REFUSAL_THRESHOLD={best_threshold:.2f} in your .env file")
+    print(f"  Updated {env_key}={best_threshold:.2f} in your .env file")
 
 
 # =============================================================================
@@ -362,7 +361,7 @@ def update_env_threshold(best_threshold):
 
 def main():
     print("RAG Threshold Calibration Tool")
-    print("Finds the best REFUSAL_CONFIDENCE_THRESHOLD for your dataset\n")
+    print("Tunes a provider-specific relevance cutoff; scores are not answer probabilities.\n")
     print(f"  In-scope questions    : {len(IN_SCOPE_QUESTIONS)}")
     print(f"  Out-of-scope questions: {len(OUT_SCOPE_QUESTIONS)}")
 
@@ -390,22 +389,24 @@ def main():
     in_scope_scores, out_scope_scores = collect_scores(collection, bm25, bm25_chunks, reranker)
 
     # Sweep thresholds
-    print("\n\n  Sweeping thresholds from 0.40 to 0.95...")
+    print("\n\n  Sweeping relevance thresholds from 0.01 to 1.00...")
     sweep_results = sweep_thresholds(in_scope_scores, out_scope_scores)
 
     # Print table and get best threshold
     best_threshold = print_results_table(sweep_results, in_scope_scores, out_scope_scores)
 
     # Summary
-    current_threshold = float(os.getenv("REFUSAL_THRESHOLD", "0.70"))
+    env_key = THRESHOLD_ENV_KEYS[reranker.provider]
+    current_threshold = get_relevance_threshold(reranker.provider)
     print("\n\n" + "="*80)
     print("  CALIBRATION SUMMARY")
     print("="*80)
-    print(f"  Current threshold (from .env) : {current_threshold:.2f}  ({current_threshold*100:.0f}%)")
-    print(f"  Recommended threshold         : {best_threshold:.2f}  ({best_threshold*100:.0f}%)")
+    print(f"  Current relevance threshold   : {current_threshold:.2f}")
+    print(f"  Recommended relevance cutoff  : {best_threshold:.2f}")
+    print(f"  Provider configuration key    : {env_key}")
 
     if abs(best_threshold - current_threshold) < 0.01:
-        print("  Your current threshold is already optimal!")
+        print("  Your current threshold matches the recommendation for this test set.")
     elif best_threshold > current_threshold:
         print(f"  Recommendation: RAISE the threshold (stricter refusals)")
         print(f"  This will reduce wrongly-answered out-of-scope questions.")
@@ -414,16 +415,16 @@ def main():
         print(f"  This will stop refusing valid in-scope questions.")
 
     # Save results
-    save_calibration_results(sweep_results, in_scope_scores, out_scope_scores, best_threshold)
+    save_calibration_results(sweep_results, in_scope_scores, out_scope_scores, best_threshold, reranker.provider)
 
     # Ask to update .env
     print("\n" + "="*80)
-    answer = input(f"  Auto-update REFUSAL_THRESHOLD={best_threshold:.2f} in your .env? [y/N]: ").strip().lower()
+    answer = input(f"  Auto-update {env_key}={best_threshold:.2f} in your .env? [y/N]: ").strip().lower()
     if answer == "y":
-        update_env_threshold(best_threshold)
+        update_env_threshold(best_threshold, reranker.provider)
     else:
         print(f"\n  To apply manually, add this line to your .env:")
-        print(f"  REFUSAL_THRESHOLD={best_threshold:.2f}")
+        print(f"  {env_key}={best_threshold:.2f}")
 
     print("\n  Calibration complete!\n")
 

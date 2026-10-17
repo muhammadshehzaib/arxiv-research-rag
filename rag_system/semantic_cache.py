@@ -8,6 +8,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from rag_system.utils import to_jsonable
+from rag_system.relevance import SCORING_VERSION
 
 CACHE_FILE_PATH = os.path.join("data", "semantic_cache.json")
 DEFAULT_SIMILARITY_THRESHOLD = float(os.getenv("SEMANTIC_CACHE_THRESHOLD", "0.92"))
@@ -86,7 +87,10 @@ class SemanticCache:
                 raw_data = json.load(f)
             self.entries = []
             for item in raw_data:
+                if item.get("scoring_version") != SCORING_VERSION:
+                    continue
                 self.entries.append({
+                    "scoring_version": SCORING_VERSION,
                     "query_text": item["query_text"],
                     "embedding": np.array(item["embedding"], dtype=np.float32),
                     "answer": item["answer"],
@@ -107,6 +111,7 @@ class SemanticCache:
             for item in self.entries:
                 emb = item["embedding"].tolist() if hasattr(item["embedding"], "tolist") else list(item["embedding"])
                 serializable.append({
+                    "scoring_version": SCORING_VERSION,
                     "query_text": item["query_text"],
                     "embedding": emb,
                     "answer": item["answer"],
@@ -179,6 +184,7 @@ class SemanticCache:
 
         q_vec = np.array(query_embedding, dtype=np.float32)
         entry = {
+            "scoring_version": SCORING_VERSION,
             "query_text": query_text,
             "embedding": q_vec,
             "answer": answer,

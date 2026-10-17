@@ -2,11 +2,16 @@
  * Utility helpers for formatting and UI alerts.
  */
 
-/**
- * Format markdown-like text structure to HTML strings with citation binding.
- * @param {string} text Raw markdown or unformatted text response from LLM.
- * @returns {string} Formatted HTML representation.
- */
+/** Display only explicitly scored relevance; never infer confidence from distance. */
+export function formatRelevanceScore(source) {
+    const score = source.relevance_score;
+    if (typeof score === "number" && Number.isFinite(score) && score >= 0 && score <= 1) {
+        return `Relevance: ${score.toFixed(3)}`;
+    }
+    return source.is_live_mcp ? "Live source · unscored" : "Relevance not scored";
+}
+
+/** Format markdown-like text as escaped HTML with citation binding. */
 export function formatMarkdown(text) {
     // Escape HTML tags to prevent XSS
     let escaped = text

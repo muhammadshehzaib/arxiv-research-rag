@@ -9,10 +9,11 @@ from google.api_core.exceptions import DeadlineExceeded as GoogleDeadlineExceede
 from dotenv import load_dotenv
 import re
 import json
-import numpy as np
+import inspect
 from rank_bm25 import BM25Okapi
 from rag_system.semantic_cache import get_semantic_cache
 from rag_system.knowledge_graph import get_knowledge_graph
+from rag_system.relevance import finite_raw_score, normalize_relevance_score, get_relevance_threshold
 from rag_system.utils import setup_windows_encoding, date_to_int, tokenize_text, get_corpus_size
 from rag_system.query_policy import (
     QUERY_TIMEOUT_SECONDS, MCP_SEARCH_TIMEOUT_SECONDS, GEMINI_TIMEOUT_SECONDS,
@@ -20,8 +21,6 @@ from rag_system.query_policy import (
     quick_reply, remaining_seconds, set_deadline, timed_stage,
 )
 
-
-REFUSAL_CONFIDENCE_THRESHOLD = float(os.getenv("REFUSAL_THRESHOLD", "0.70"))
 
 # Reranker package imports
 try:
@@ -37,6 +36,14 @@ except ImportError:
     HAS_COHERE = False
 
 class Reranker:
+    @staticmethod
+    def _with_relevance_scores(passages, provider):
+        for passage in passages:
+            passage["score"] = finite_raw_score(passage.get("score"))
+            passage["relevance_score"] = normalize_relevance_score(passage["score"], provider)
+            passage["reranker_provider"] = provider
+        return sorted(passages, key=lambda passage: passage["relevance_score"], reverse=True)
+
     def __init__(self):
         self.cohere_api_key = os.getenv("COHERE_API_KEY")
         self.cohere_client = None
@@ -113,7 +120,7 @@ class Reranker:
                     passage = passages[idx]
                     passage["score"] = res.relevance_score
                     reranked.append(passage)
-                return reranked
+                return self._with_relevance_scores(reranked, "cohere")
             except Exception as e:
                 print(f"⚠️ Cohere reranking failed: {e}. Falling back to other ordering.")
                 
@@ -121,7 +128,14 @@ class Reranker:
         if self.sentence_transformers_client:
             try:
                 pairs = [(query, p["text"]) for p in passages]
-                scores = self.sentence_transformers_client.predict(pairs)
+                predict = self.sentence_transformers_client.predict
+                # Explicitly request logits; model defaults may already apply sigmoid.
+                # Sentence Transformers renamed activation_fct to activation_fn.
+                activation_key = (
+                    "activation_fn" if "activation_fn" in inspect.signature(predict).parameters
+                    else "activation_fct"
+                )
+                scores = predict(pairs, **{activation_key: lambda logits: logits})
                 
                 # Assign scores to passages
                 for idx, score in enumerate(scores):
@@ -129,7 +143,7 @@ class Reranker:
                 
                 # Sort by score descending
                 passages.sort(key=lambda x: x["score"], reverse=True)
-                return passages
+                return self._with_relevance_scores(passages, "sentence-transformers")
             except Exception as e:
                 print(f"⚠️ Cross-Encoder reranking failed: {e}. Falling back to other ordering.")
                 
@@ -158,12 +172,12 @@ class Reranker:
                         rid      = res.id
                         rtext    = res.text
                         rmeta    = res.meta if hasattr(res, 'meta') else {}
-                        rscore   = res.score if hasattr(res, 'score') else 0.0
+                        rscore   = res.score if hasattr(res, 'score') else None
                     else:
                         rid      = res.get("id")
                         rtext    = res.get("text", "")
                         rmeta    = res.get("meta", {})
-                        rscore   = res.get("score", 0.0)
+                        rscore   = res.get("score")
                     reranked.append({
                         "id":       rid,
                         "text":     rtext,
@@ -171,15 +185,15 @@ class Reranker:
                         "rrf_score": rmeta.get("rrf_score", 0.0) if isinstance(rmeta, dict) else 0.0,
                         "score":    rscore
                     })
-                return reranked
+                return self._with_relevance_scores(reranked, "flashrank")
             except Exception as e:
                 print(f"⚠️ FlashRank reranking failed: {e}. Falling back to default/local ordering.")
                 
         # Fail-closed fallback: No active reranker provider
         print("⚠️ No active reranker provider. Operating in fail-closed safety mode.")
-        for idx, p in enumerate(passages):
-            p["score"] = -10.0  # Guarantees failure of confidence threshold (Sigmoid(-10) ~ 0.0%)
-        return passages
+        for p in passages:
+            p["score"] = None
+        return self._with_relevance_scores(passages, None)
 
 # Global lazy-loaded reranker
 _reranker_instance = None
@@ -493,7 +507,7 @@ Standalone Search Query:"""
 def fallback_to_live_mcp(query_text, original_user_query, num_results, chat_history, start_time, reason="Insufficient Evidence", progress=None):
     """
     Connects to the Academic MCP Server to retrieve live research papers from arXiv / Semantic Scholar
-    when the local Chroma DB vector store lacks matching documents or sufficient confidence.
+    when the local Chroma DB vector store lacks matching documents or sufficient relevance.
     """
     try:
         from rag_system.mcp_client import get_mcp_client
@@ -881,8 +895,8 @@ def query_rag(collection, query_text, num_results=3, paper_id=None, published_af
     reranker = get_reranker()
     if not reranker.is_active:
         refusal_msg = (
-            "🛡️ [REFUSAL LADDER ACTIVATED - Unverified Confidence]\n\n"
-            "No active reranker provider (Cohere, Sentence-Transformers, or FlashRank) is loaded to evaluate confidence scores.\n"
+            "🛡️ [REFUSAL LADDER ACTIVATED - Unscored Relevance]\n\n"
+            "No active reranker provider (Cohere, Sentence-Transformers, or FlashRank) is loaded to evaluate relevance scores.\n"
             "Aborted LLM generation in fail-closed safety mode to prevent hallucinations."
         )
         print(f"\n{refusal_msg}\n")
@@ -918,7 +932,9 @@ def query_rag(collection, query_text, num_results=3, paper_id=None, published_af
                     "chunk_id": p["id"],
                     "text": p_text,  # Full parent text resolved from registry
                     "metadata": p["metadata"],
-                    "score": p.get("score", 0.0),
+                    "score": p.get("score"),
+                    "relevance_score": p.get("relevance_score", 0.0),
+                    "reranker_provider": p.get("reranker_provider"),
                     "rrf_score": p.get("rrf_score", 0.0)
                 })
         else:
@@ -930,7 +946,9 @@ def query_rag(collection, query_text, num_results=3, paper_id=None, published_af
                     "chunk_id": cid,
                     "text": p["text"],
                     "metadata": p["metadata"],
-                    "score": p.get("score", 0.0),
+                    "score": p.get("score"),
+                    "relevance_score": p.get("relevance_score", 0.0),
+                    "reranker_provider": p.get("reranker_provider"),
                     "rrf_score": p.get("rrf_score", 0.0)
                 })
 
@@ -966,16 +984,13 @@ def query_rag(collection, query_text, num_results=3, paper_id=None, published_af
         paper_id = meta.get("paper_id", "")
         chunk_idx = meta.get("chunk_index", 0)
         
-        # Convert reranker score to compatible distance metric for UI (distance = 1 - score)
+        # Relevance describes this query/passage match, not answer correctness.
         raw_score = item["score"]
-        # Normalized Sigmoid confidence
-        confidence = float(1.0 / (1.0 + np.exp(-raw_score)))
-        compatible_dist = 1.0 - confidence
+        relevance_score = item["relevance_score"]
         
         block = (
             f"Source [{i+1}]: {title} (ID: {paper_id}, Chunk: {chunk_idx})\n"
             f"Authors: {authors}\n"
-            f"Confidence: {confidence * 100:.1f}%\n"
             f"Text content:\n{doc}\n"
         )
         context_blocks.append(block)
@@ -986,20 +1001,21 @@ def query_rag(collection, query_text, num_results=3, paper_id=None, published_af
             "authors": authors,
             "pdf_url": pdf_url,
             "paper_id": paper_id,
-            "distance": compatible_dist,
-            "confidence": confidence,
+            "relevance_score": relevance_score,
+            "reranker_provider": item["reranker_provider"],
             "rrf_score": item["rrf_score"],
             "rerank_score": raw_score,
             "text": doc
         })
 
     # --- REFUSAL LADDER: RUNG 2 (Relevance Floor / Insufficient Evidence) ---
-    top_confidence = sources[0]["confidence"]
+    top_relevance = sources[0]["relevance_score"]
     top_raw_score = sources[0]["rerank_score"]
+    relevance_threshold = get_relevance_threshold(sources[0]["reranker_provider"])
     
-    if top_confidence < REFUSAL_CONFIDENCE_THRESHOLD:
+    if top_relevance < relevance_threshold:
         if live_fallback_allowed:
-            mcp_ans, mcp_sources = fallback_to_live_mcp(query_text, original_user_query, num_results, chat_history, start_time, reason=f"Low Local Confidence ({top_confidence*100:.1f}% < {REFUSAL_CONFIDENCE_THRESHOLD*100:.0f}%)", progress=progress)
+            mcp_ans, mcp_sources = fallback_to_live_mcp(query_text, original_user_query, num_results, chat_history, start_time, reason=f"Low Local Relevance ({top_relevance:.3f} < {relevance_threshold:.3f})", progress=progress)
             if mcp_ans is not None:
                 return mcp_ans, mcp_sources
 
@@ -1010,15 +1026,15 @@ def query_rag(collection, query_text, num_results=3, paper_id=None, published_af
         refusal_msg = (
             f"🛡️ [REFUSAL LADDER ACTIVATED - Insufficient Evidence]\n\n"
             f"Based on the {corpus_size:,} arXiv research papers in the database, there is insufficient evidence "
-            f"to reliably answer this question (Retrieval Confidence: {top_confidence * 100:.1f}% < {REFUSAL_CONFIDENCE_THRESHOLD * 100:.0f}% threshold).\n\n"
+            f"to reliably answer this question (Retrieval relevance score: {top_relevance:.3f} < {relevance_threshold:.3f} threshold).\n\n"
             f"The corpus focuses on AI, Machine Learning, Computer Vision, NLP, and Cybersecurity.\n"
             f"Closest indexed paper: \"{top_title}\""
         )
         
         print(f"\n🛡️ [REFUSAL LADDER ACTIVATED - Rung 2: Low Relevance Floor]")
-        print(f"   Top Match Score:      {top_raw_score:.3f} (Confidence: {top_confidence * 100:.1f}%)")
-        print(f"   Required Threshold:   {REFUSAL_CONFIDENCE_THRESHOLD * 100:.0f}%")
-        print(f"   Status:               Aborted LLM generation in {elapsed_ms:.1f}ms (Zero Hallucination, $0 API Cost)\n")
+        print(f"   Top Match Score:      {top_raw_score!r} (Relevance: {top_relevance:.3f})")
+        print(f"   Required Threshold:   {relevance_threshold:.3f}")
+        print(f"   Status:               Skipped local answer generation in {elapsed_ms:.1f}ms\n")
         
         return refusal_msg, sources
         
@@ -1104,7 +1120,9 @@ def print_result(query_text, answer, sources):
         print(f"  [{src['index']}] {src['title']}")
         print(f"      Authors: {src['authors']}")
         print(f"      ArXiv URL: {src['pdf_url']}")
-        print(f"      Distance Score: {src['distance']:.4f}")
+        relevance = src.get("relevance_score")
+        label = f"{relevance:.3f}" if relevance is not None else "unscored"
+        print(f"      Retrieval relevance: {label}")
     print("="*80 + "\n")
 
 def interactive_chat(collection, paper_id=None, published_after=None, min_pages=None, enable_mcp_fallback=True):
@@ -1160,7 +1178,7 @@ if __name__ == "__main__":
     parser.add_argument("--paper-id", type=str, default=None, help="Filter results by a specific arXiv Paper ID.")
     parser.add_argument("--published-after", type=str, default=None, help="Filter results by publication date (YYYY-MM-DD or newer).")
     parser.add_argument("--min-pages", type=int, default=None, help="Filter results by minimum page count.")
-    parser.add_argument("--no-mcp-fallback", action="store_true", help="Disable live MCP fallback for missing or low-confidence papers.")
+    parser.add_argument("--no-mcp-fallback", action="store_true", help="Disable live MCP fallback for missing or low-relevance papers.")
     args = parser.parse_args()
     
     try:
