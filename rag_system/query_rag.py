@@ -606,6 +606,9 @@ def query_rag(collection, query_text, num_results=3, paper_id=None, published_af
     }
     
     cache = get_semantic_cache()
+    # A response generated with history is conversation-specific. Do not reuse or
+    # publish it through the shared semantic cache, even if rephrasing fails.
+    cache_allowed = not bool(chat_history)
     # Compute query embedding once upfront to avoid duplicate API calls
     query_vector = None
     if EMBEDDING_PROVIDER != "local":
@@ -615,8 +618,9 @@ def query_rag(collection, query_text, num_results=3, paper_id=None, published_af
         except Exception:
             query_vector = None
 
-    is_hit, cached_answer, cached_sources, sim_score, matched_query = cache.lookup(
-        query_text, query_embedding=query_vector, filters=manual_filters
+    is_hit, cached_answer, cached_sources, sim_score, matched_query = (
+        cache.lookup(query_text, query_embedding=query_vector, filters=manual_filters)
+        if cache_allowed else (False, None, [], 0.0, None)
     )
     if is_hit:
         elapsed_ms = (time.time() - start_time) * 1000
@@ -646,16 +650,6 @@ def query_rag(collection, query_text, num_results=3, paper_id=None, published_af
                         query_vector = get_query_embedding(query_text)
                 except Exception:
                     query_vector = None
-
-            # Check cache again with the rephrased standalone query
-            is_hit_rep, cached_ans_rep, cached_src_rep, sim_rep, matched_rep = cache.lookup(
-                query_text, query_embedding=query_vector, filters=manual_filters
-            )
-            if is_hit_rep:
-                elapsed_ms = (time.time() - start_time) * 1000
-                print(f"\n⚡ [SEMANTIC CACHE HIT via Rephrased Query] (Similarity: {sim_rep * 100:.1f}% to cached query: '{matched_rep}')")
-                print(f"⏱️ Response Latency: {elapsed_ms:.1f}ms (LLM Generation Saved)")
-                return cached_ans_rep, cached_src_rep
 
     # 4. Auto-extract filters if none are manually specified (only executed on cache miss)
     if not paper_id and not published_after and not min_pages and needs_metadata_extraction(query_text):
@@ -1097,9 +1091,10 @@ Answer:"""
         generated_answer = response.text
         
         # Store in Semantic Cache for future identical / paraphrased queries
-        cache.store(query_text, generated_answer, sources, query_embedding=query_vector, filters=active_filters)
+        if cache_allowed:
+            cache.store(query_text, generated_answer, sources, query_embedding=query_vector, filters=active_filters)
         elapsed_ms = (time.time() - start_time) * 1000
-        print(f"⏱️ Full Pipeline Latency: {elapsed_ms:.1f}ms (Response Generated & Cached)")
+        print(f"⏱️ Full Pipeline Latency: {elapsed_ms:.1f}ms (Response generated; shared cache {'enabled' if cache_allowed else 'bypassed'})")
         
         return generated_answer, sources
     except QueryDeadlineExceeded:

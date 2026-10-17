@@ -122,6 +122,7 @@ To inspect startup or query errors, run `docker compose logs -f web`. Press Ctrl
 
 ## Change Log & Execution History
 
+- [2026-10-18] Isolated conversational answers from the shared semantic cache: history-bearing requests always resolve context and never read or write shared cached answers.
 - [2026-10-18] Fixed the packaged FTS builder import and made vector/keyword indexing failures propagate to a nonzero ingestion exit status so failed batches can be retried.
 - [2026-10-18] Fixed the evaluation button's packaged evaluator import and verified its HTTP success and failure responses without external API calls.
 - [2026-10-17] Corrected provider-specific relevance scoring and refusal thresholds, removed fabricated live-source confidence, updated source labels and calibration, invalidated legacy scoring caches, and added regression tests.
